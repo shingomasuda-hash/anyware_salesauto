@@ -378,8 +378,9 @@ npm run build       # next build
    - `DATA_MODE=live`, `AUTH_MODE=neon`
    - `CRON_SECRET` に長いランダム文字列を設定（Vercel Cron はこの値を `Authorization: Bearer` で送信）
    - `JOB_SECRET` も設定（外部スケジューラから叩く場合）
-3. デプロイ。`vercel.json` の Cron（毎分 `/api/cron/process-jobs`）が自動登録されます
-   - Hobby プランは Cron が 1日1回に制限されます。その場合は検索進捗画面のポーリング / 外部スケジューラ（例: cron-job.org から `POST /api/jobs/process` に `Authorization: Bearer <JOB_SECRET>`）で補ってください
+3. デプロイ。`vercel.json` の Cron（毎日 03:00 JST に `/api/cron/process-jobs`）が自動登録されます
+   - Hobby プランは Cron が 1日1回までのため既定は日次にしています。Pro プランなら `vercel.json` の schedule を `* * * * *`（毎分）に変更すると画面を閉じていても処理が進みます
+   - 日次のままでも、検索進捗画面を開いている間はポーリングで処理が進みます。外部スケジューラ（例: cron-job.org から `POST /api/jobs/process` に `Authorization: Bearer <JOB_SECRET>`）で補うこともできます
 4. `APP_URL` を本番 URL に設定
 5. 関数実行時間: Route Handler は `maxDuration = 300` を指定済み。Hobby プランでは最大 60 秒のため `JOB_MAX_RUNTIME_MS=45000` 程度に下げてください
 
