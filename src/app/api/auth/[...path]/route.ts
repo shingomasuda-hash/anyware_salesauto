@@ -19,20 +19,28 @@ function isBlocked(request: NextRequest): boolean {
  * Neon Auth のプロキシハンドラ。
  * クライアントからの認証リクエストを Neon Auth へ中継し、セッション Cookie を管理する。
  */
+type Ctx = { params: Promise<{ path: string[] }> };
+type Handler = (request: NextRequest, ctx: Ctx) => Promise<Response> | Response;
+
+let cachedHandlers: { GET: Handler; POST: Handler } | null = null;
+
+/** 設定の読み込みはビルド時ではなくリクエスト時に行う（Vercel のビルドで環境変数を評価させない） */
 function handlers() {
+  if (cachedHandlers) return cachedHandlers;
   if (isAuthDisabled() || !hasNeonAuthConfig()) {
-    const notConfigured = () => NextResponse.json({ error: "Neon Auth is not configured" }, { status: 503 });
+    const notConfigured: Handler = () => NextResponse.json({ error: "Neon Auth is not configured" }, { status: 503 });
     return { GET: notConfigured, POST: notConfigured };
   }
-  const h = getAuth().handler();
-  return {
-    GET: (request: NextRequest, ctx: { params: Promise<{ path: string[] }> }) =>
-      isBlocked(request) ? NextResponse.json({ error: "Not allowed" }, { status: 403 }) : h.GET(request, ctx),
-    POST: (request: NextRequest, ctx: { params: Promise<{ path: string[] }> }) =>
-      isBlocked(request) ? NextResponse.json({ error: "Not allowed" }, { status: 403 }) : h.POST(request, ctx),
+  cachedHandlers = getAuth().handler();
+  return cachedHandlers;
+}
+
+function guard(method: "GET" | "POST"): Handler {
+  return (request, ctx) => {
+    if (isBlocked(request)) return NextResponse.json({ error: "Not allowed" }, { status: 403 });
+    return handlers()[method](request, ctx);
   };
 }
 
-const h = handlers();
-export const GET = h.GET;
-export const POST = h.POST;
+export const GET = guard("GET");
+export const POST = guard("POST");

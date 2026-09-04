@@ -46,7 +46,12 @@ let cached: Env | null = null;
 
 export function getEnv(): Env {
   if (cached) return cached;
-  const parsed = envSchema.safeParse(process.env);
+  // Vercel 等で「値が空」の変数が登録されている場合は未設定として扱う
+  const source: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (typeof v === "string" && v.trim() !== "") source[k] = v.trim();
+  }
+  const parsed = envSchema.safeParse(source);
   if (!parsed.success) {
     throw new Error(`環境変数が不正です: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(", ")}`);
   }
