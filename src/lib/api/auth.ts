@@ -1,8 +1,8 @@
 import { getEnv } from "@/lib/config/env";
-import { getCurrentUser } from "@/lib/supabase/auth";
+import { getCurrentUser } from "@/lib/auth/session";
 
 /**
- * API ルートの認可: ログインユーザー、または Bearer トークン（JOB_SECRET / CRON_SECRET）。
+ * API ルートの認可: ログインユーザー（Neon Auth セッション）、または Bearer トークン（JOB_SECRET / CRON_SECRET）。
  */
 export async function authorizeApiRequest(
   request: Request,

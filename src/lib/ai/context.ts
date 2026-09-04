@@ -1,4 +1,4 @@
-import type { CompanyPageRow, CompanyRow } from "@/lib/db/types";
+import type { CompanyPageRow, CompanyRow } from "@/db/types";
 import type { PageType } from "@/lib/crawler/types";
 
 /** ページ種別ごとの文字数予算（トークン節約のため TOP 全文を毎回送らない） */

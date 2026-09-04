@@ -14,7 +14,7 @@ Phase 4 以降（サービス登録・AIマッチング・営業メール生成�
 2. [技術構成](#2-技術構成)
 3. [ディレクトリ構成](#3-ディレクトリ構成)
 4. [ローカル起動方法](#4-ローカル起動方法)
-5. [Supabase 設定方法](#5-supabase-設定方法)
+5. [Neon 設定方法](#5-neon-設定方法非エンジニア向け手順)
 6. [Claude API 設定](#6-claude-api-設定)
 7. [GビズINFO API 設定](#7-gビズinfo-api-設定)
 8. [Google API 設定](#8-google-api-設定)
@@ -46,6 +46,7 @@ Phase 4 以降（サービス登録・AIマッチング・営業メール生成�
 設計思想:
 
 - **企業情報 / 企業分析 / 営業情報 / サービス情報を分離**（`companies` / `company_analysis` / `suppression_list` 等 / `services`）
+- **データ基盤は Neon PostgreSQL + Drizzle ORM**、認証は **Neon Auth**（Supabase から移行済み）
 - 採用支援を売るためだけのシステムにせず、**企業 × サービス** の将来マッチングを前提とした汎用基盤
 - **hallucination 防止**: Web上で確認できた事実（`observed_facts`）と AI の推測（`inferences`）を分離保存、不明値は `null` / `unknown`、Evidence は実際にクロールした URL のみ保存
 - **営業拒否表記の検出**: ルールベース + AI。検出企業は `sales_contact_allowed = 'false'` となり `suppression_list` に自動登録され、将来の自動送信から必ず除外できる
@@ -57,21 +58,25 @@ Phase 4 以降（サービス登録・AIマッチング・営業メール生成�
 | --- | --- |
 | Frontend / Backend | Next.js 16 (App Router, Turbopack), TypeScript, React 19 |
 | UI | Tailwind CSS v4, shadcn/ui 相当のコンポーネント（Radix UI + CVA。`src/components/ui`） |
-| Database / Auth | Supabase (PostgreSQL + Row Level Security + Supabase Auth) |
+| Database | Neon PostgreSQL（`@neondatabase/serverless` HTTP ドライバ + Drizzle ORM / drizzle-kit） |
+| Auth | Neon Auth（`@neondatabase/auth`、Better Auth ベース。メール + パスワード） |
 | AI | Anthropic Claude API（`@anthropic-ai/sdk`、構造化出力 + Zod 検証、Prompt Caching） |
 | 企業情報 | GビズINFO REST API、公開企業サイト、Google Places API (New)（任意） |
 | クローラー | fetch + cheerio + robots-parser + iconv-lite（Shift_JIS / EUC-JP 対応） |
 | バリデーション | Zod v4 |
 | テスト | Vitest |
 | Hosting | Vercel（Cron Jobs 対応） |
+| ローカルDB（任意） | 通常の PostgreSQL（`pg` ドライバに自動切替。テスト用） |
 
 ## 3. ディレクトリ構成
 
 ```
 .
-├── supabase/
-│   ├── config.toml                 # supabase CLI 設定（ローカル起動用）
-│   └── migrations/0001_init.sql    # 全テーブル / ビュー / RPC / RLS
+├── drizzle/
+│   ├── 0000_init.sql               # 全テーブル / インデックス / FK（drizzle-kit generate で生成）
+│   ├── 0001_functions.sql          # ビュー / claim_job 等の PostgreSQL 関数 / トリガー（custom migration）
+│   └── meta/                       # drizzle-kit のスナップショット・ジャーナル
+├── drizzle.config.ts               # drizzle-kit 設定（DATABASE_URL を .env.local から読む）
 ├── scripts/
 │   ├── seed.ts                     # 開発用ユーザー作成 + モック検索の実行
 │   └── run-jobs.ts                 # ローカル用ジョブランナー（Cron の代替）
@@ -86,6 +91,7 @@ Phase 4 以降（サービス登録・AIマッチング・営業メール生成�
 │   │   │   ├── logs/               # システムログ / AI API 使用量
 │   │   │   └── actions.ts          # Server Actions（検索開始・手動追加・再解析 等）
 │   │   └── api/
+│   │       ├── auth/[...path]/     # Neon Auth プロキシハンドラ
 │   │       ├── jobs/process/       # ジョブ処理エンドポイント（ユーザー or JOB_SECRET）
 │   │       ├── cron/process-jobs/  # Vercel Cron 用（CRON_SECRET）
 │   │       ├── search-jobs/[id]/   # 検索進捗 JSON
@@ -96,10 +102,15 @@ Phase 4 以降（サービス登録・AIマッチング・営業メール生成�
 │   │   ├── companies/              # 企業テーブル / フィルタ / バッジ / 詳細セクション
 │   │   ├── search/                 # 検索進捗（ポーリング）
 │   │   └── jobs/, dashboard/
+│   ├── db/                         # データアクセス層（Drizzle）
+│   │   ├── schema.ts               # Drizzle スキーマ（全テーブル + company_overview ビュー）
+│   │   ├── index.ts                # getDb()（Neon HTTP / ローカル pg の自動切替）
+│   │   ├── types.ts                # Row 型（旧 Database 型と同名で公開）
+│   │   ├── errors.ts               # PostgreSQL エラーコード判定
+│   │   └── repositories/           # companies / pages / analysis / jobs / logs / suppression
 │   ├── lib/
 │   │   ├── config/                 # env.ts（Zod で環境変数検証）/ ai.ts / crawler.ts
-│   │   ├── db/types.ts             # Supabase Database 型
-│   │   ├── supabase/               # server / admin(service_role) / browser / auth
+│   │   ├── auth/                   # Neon Auth: server.ts（createNeonAuth）/ session.ts（getCurrentUser / requireUser）
 │   │   ├── companies/              # normalize / dedupe / official-site / register / filters / csv / queries
 │   │   ├── integrations/
 │   │   │   ├── gbiz/               # GビズINFO クライアント + モック + マッピング
@@ -111,7 +122,7 @@ Phase 4 以降（サービス登録・AIマッチング・営業メール生成�
 │   │   ├── jobs/                   # runner / search-job / crawl-job / analysis-job / enqueue / status / kick
 │   │   ├── logging/                # Logger（console + system_logs）
 │   │   └── api/                    # API 認可
-│   └── proxy.ts                    # Supabase セッション更新 + 未ログインリダイレクト（旧 middleware）
+│   └── proxy.ts                    # Neon Auth middleware による未ログインリダイレクト（旧 middleware）
 ├── .env.example
 ├── vercel.json                     # Cron 設定
 └── vitest.config.ts
@@ -122,7 +133,7 @@ Phase 4 以降（サービス登録・AIマッチング・営業メール生成�
 ### 前提
 
 - Node.js 20 以上（開発時は 22 で確認）
-- Supabase プロジェクト（クラウド）または Docker + Supabase CLI（ローカル）
+- Neon プロジェクト（database: `neondb`）。ローカル PostgreSQL でも動作します（後述）
 
 ### 手順
 
@@ -132,19 +143,18 @@ npm install
 
 # 2. 環境変数
 cp .env.example .env.local
-#    → NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY を設定
+#    → DATABASE_URL（Neon の接続文字列）、NEON_AUTH_BASE_URL、NEON_AUTH_COOKIE_SECRET を設定
 #    → API キー未取得のうちは DATA_MODE=mock のままで OK
 
 # 3. DB マイグレーション（詳細は「10. DB migration 方法」）
-npx supabase db push          # クラウド Supabase に適用する場合
-#   or
-npm run db:start && npm run db:reset   # Docker でローカル Supabase を使う場合
+npm run db:migrate
 
-# 4. ログインユーザー作成（Supabase Dashboard > Authentication > Users から作成、または）
-npm run seed                  # admin@example.com / password123 を作成
-npm run seed -- --with-mock-search   # さらにモックで「大阪府 / 製造業 / 20社」を収集・分析
+# 4. ログインユーザー作成（Neon Console > Auth > Users）。開発中は AUTH_MODE=disabled でも可
 
-# 5. 起動
+# 5. （任意）モックで「大阪府 / 製造業 / 20社」を収集・分析してデータを用意
+npm run seed
+
+# 6. 起動
 npm run dev                   # http://localhost:3000
 ```
 
@@ -156,18 +166,63 @@ npm run dev                   # http://localhost:3000
 
 > 開発中に認証を省略したい場合は `.env.local` に `AUTH_MODE=disabled` を設定してください（`NODE_ENV=production` では無視され、必ず認証が有効になります）。
 
-## 5. Supabase 設定方法
+## 5. Neon 設定方法（非エンジニア向け手順）
 
-1. https://supabase.com でプロジェクトを作成
-2. **Project Settings > API** から以下を取得し `.env.local` へ
-   - `Project URL` → `NEXT_PUBLIC_SUPABASE_URL`
-   - `anon public` → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - `service_role` → `SUPABASE_SERVICE_ROLE_KEY`（**サーバー専用。絶対に公開しない**）
-3. **Authentication > Providers > Email** を有効化（社内利用のため「Confirm email」は任意）
-4. **Authentication > Users > Add user** で利用者を作成（サインアップ画面は用意していません）
-5. マイグレーション適用（「10. DB migration 方法」）
+### 5-1. Neon プロジェクトの作成
 
-RLS ポリシーは「認証済みユーザーは全テーブルを読み書き可 / anon は不可」。バックグラウンドジョブは `service_role` で動作します。
+1. https://neon.com にサインアップし、**New Project** を押します
+2. Project name は任意（例: `anyware-sales-ai`）、Database name は **`neondb`**、Region は **Asia Pacific (Singapore)** など日本に近いリージョンを選び **Create project**
+
+### 5-2. DATABASE_URL の取得
+
+1. Neon Console のプロジェクト画面右上 **Connect** を押します
+2. Database が `neondb`、Role が `neondb_owner` になっていることを確認
+3. **Connection string** をコピーします（`postgresql://neondb_owner:xxxx@ep-xxxx-pooler.….neon.tech/neondb?sslmode=require` の形式）
+4. `.env.local` の `DATABASE_URL=` の右側に貼り付けます
+   - この文字列にはパスワードが含まれます。**コードや Git、チャットに貼らない**でください
+   - `NEXT_PUBLIC_` を付けてはいけません（ブラウザに露出します）
+
+### 5-3. Neon Auth の有効化
+
+1. Neon Console 左メニューの **Auth** を開き **Enable Neon Auth** を押します
+2. 表示される **Base URL**（`https://ep-xxxx.neonauth.….neon.tech/neondb/auth` の形式）をコピーし、`.env.local` の `NEON_AUTH_BASE_URL=` に貼り付けます
+3. **Email / Password** サインインが有効になっていることを確認します（既定で有効）
+4. Auth 画面の **Users** タブ → **Add user** で、社内利用者のメールアドレスとパスワードを登録します（このシステムにはサインアップ画面はありません）
+5. `NEON_AUTH_COOKIE_SECRET` には 32 文字以上のランダム文字列を設定します。ターミナルで次を実行した結果を貼り付けてください
+   ```bash
+   openssl rand -base64 32
+   ```
+
+### 5-4. .env.local の最小構成
+
+```
+DATABASE_URL=postgresql://neondb_owner:xxxx@ep-xxxx-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require
+NEON_AUTH_BASE_URL=https://ep-xxxx.neonauth.ap-southeast-1.aws.neon.tech/neondb/auth
+NEON_AUTH_COOKIE_SECRET=（openssl rand -base64 32 の結果）
+DATA_MODE=mock            # APIキー設定後は live
+ANTHROPIC_API_KEY=
+GBIZ_API_KEY=
+CRON_SECRET=（任意のランダム文字列）
+JOB_SECRET=（任意のランダム文字列）
+APP_URL=http://localhost:3000
+```
+
+### 5-5. テーブル作成（Drizzle migration）
+
+```bash
+npm install
+npm run db:migrate
+```
+
+`drizzle/` にあるマイグレーション（テーブル・インデックス・ビュー・ジョブ取得関数）が Neon に適用されます。
+Neon Console の **Tables** で `companies` などが見えれば成功です。
+
+### 5-6. 認証の仕組み
+
+- 画面アクセスは `src/proxy.ts` の Neon Auth middleware で保護され、未ログインは `/login` へリダイレクトされます
+- Server Action / Route Handler は `requireUser()` / `getCurrentUser()`（`src/lib/auth/session.ts`）でセッションを検証します
+- `/api/jobs/process` と `/api/cron/process-jobs` はログインユーザーまたは `JOB_SECRET` / `CRON_SECRET` の Bearer トークンでのみ実行できます
+- DB は常にサーバー側から `DATABASE_URL` で接続します（ブラウザから DB へは接続しません）。単一企業の内部ツールのため PostgreSQL RLS は使用せず、アプリ層の認証で保護するシンプルな構成です
 
 ## 6. Claude API 設定
 
@@ -213,20 +268,21 @@ RLS ポリシーは「認証済みユーザーは全テーブルを読み書き�
 
 | 変数 | 必須 | 説明 |
 | --- | --- | --- |
+| `DATABASE_URL` | ✅ | Neon の接続文字列（サーバー専用。`NEXT_PUBLIC_` 禁止） |
+| `NEON_AUTH_BASE_URL` | ✅（認証使用時） | Neon Auth の Base URL |
+| `NEON_AUTH_COOKIE_SECRET` | ✅（認証使用時） | セッション Cookie 署名鍵（32文字以上） |
 | `APP_URL` | 推奨 | 公開URL（例: `https://xxx.vercel.app`） |
 | `DATA_MODE` | - | `live` / `mock`。未設定時は development=mock、production=live |
-| `AUTH_MODE` | - | `supabase`（既定） / `disabled`（development 限定） |
-| `NEXT_PUBLIC_SUPABASE_URL` | ✅ | Supabase Project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ✅ | Supabase anon key |
-| `SUPABASE_SERVICE_ROLE_KEY` | ✅ | service_role key（サーバー専用） |
+| `AUTH_MODE` | - | `neon`（既定） / `disabled`（development 限定） |
+| `DB_DRIVER` | - | `neon` を指定すると Neon 以外のホストでも HTTP ドライバを強制。通常は未設定（ホスト名で自動判定） |
 | `ANTHROPIC_API_KEY` | live時 | Claude API キー |
 | `ANTHROPIC_MODEL` | - | 既定 `claude-opus-5` |
 | `ANTHROPIC_MAX_OUTPUT_TOKENS` | - | 既定 8000 |
 | `ANTHROPIC_EFFORT` | - | `low` / `medium`（既定） / `high` |
 | `GBIZ_API_KEY` | live時 | GビズINFO API トークン |
 | `GOOGLE_MAPS_API_KEY` | - | Google Places API キー（任意） |
-| `JOB_SECRET` | 推奨 | `/api/jobs/process` を外部から叩くための Bearer トークン |
 | `CRON_SECRET` | Vercel | Vercel Cron が付与する Bearer トークン（Vercel 側で同名の環境変数を設定） |
+| `JOB_SECRET` | 推奨 | `/api/jobs/process` を外部から叩くための Bearer トークン |
 | `JOB_MAX_RUNTIME_MS` | - | 1回のジョブ処理の最大時間（既定 50000。Vercel の maxDuration 未満に） |
 | `CRAWL_MAX_PAGES` | - | 1社あたり最大クロールページ数（既定 20） |
 | `CRAWL_DELAY_MS` | - | リクエスト間隔（既定 1000ms。robots.txt の Crawl-delay があればそちらを優先） |
@@ -235,37 +291,26 @@ RLS ポリシーは「認証済みユーザーは全テーブルを読み書き�
 
 ## 10. DB migration 方法
 
-マイグレーションは `supabase/migrations/*.sql`（Supabase CLI 形式）です。
+マイグレーションは **Drizzle ORM / drizzle-kit** で管理します（`drizzle/*.sql` + `drizzle/meta/`）。
 
-**クラウド Supabase に適用**
+| コマンド | 内容 |
+| --- | --- |
+| `npm run db:migrate` | `drizzle/` の未適用マイグレーションを `DATABASE_URL` の DB に適用 |
+| `npm run db:generate` | `src/db/schema.ts` の変更から SQL マイグレーションを生成 |
+| `npm run db:generate -- --custom --name xxx` | 関数・ビュー等を手書きする空のマイグレーションを作成 |
+| `npm run db:check` | マイグレーションの整合性チェック |
+| `npm run db:studio` | Drizzle Studio（ブラウザで DB を閲覧） |
 
-```bash
-npx supabase login
-npx supabase link --project-ref <project-ref>
-npx supabase db push
-```
+**スキーマ変更の流れ**: `src/db/schema.ts` を編集 → `npm run db:generate` → 生成された SQL を確認 → `npm run db:migrate`。
+ビューや PostgreSQL 関数を変更する場合は `--custom` で空ファイルを作り SQL を記述します（`drizzle/0001_functions.sql` 参照）。
 
-または Supabase Dashboard の **SQL Editor** に `supabase/migrations/0001_init.sql` の内容を貼り付けて実行しても構いません。
-
-**ローカル Supabase（Docker）**
-
-```bash
-npm run db:start      # supabase start（初回はイメージ取得に時間がかかります）
-npm run db:reset      # マイグレーション再適用
-npx supabase status   # URL / anon key / service_role key を表示 → .env.local へ
-```
-
-**新しいマイグレーションを追加**
-
-```bash
-npm run db:migrate:new -- add_something
-```
+**ローカル PostgreSQL で動かす場合**: `DATABASE_URL=postgres://user:pass@127.0.0.1:5432/anyware` のように Neon 以外のホストを指定すると、自動的に `pg` ドライバに切り替わります（マイグレーション・アプリとも同じ手順）。
 
 ## 11. DB 構成
 
 | テーブル | 役割 |
 | --- | --- |
-| `companies` | 企業マスタ。法人番号 / ドメイン / 企業名+所在地 に部分ユニークインデックスで重複防止。連絡先・SNS・公式サイト信頼度・`sales_contact_allowed`・`sales_restriction_text` 等 |
+| `companies` | 企業マスタ。法人番号 / ドメイン / 企業名+所在地 に部分ユニークインデックスで重複防止。連絡先・SNS・公式サイト信頼度・`sales_contact_allowed`・`sales_restriction_text` 等。`created_by` は Neon Auth のユーザーID（text） |
 | `company_pages` | クロール済みページ（本文テキストのみ。raw HTML は保存しない） |
 | `company_analysis` | AI 分析結果（各スコア・ランク・課題・強み・事実/推測・分析理由・信頼度・トークン数）。履歴として複数行保持し `companies.latest_analysis_id` が最新を指す |
 | `company_analysis_evidence` | 分析根拠（カテゴリ / URL / 引用テキスト） |
@@ -275,9 +320,10 @@ npm run db:migrate:new -- add_something
 | `ai_usage_logs` | Claude API のトークン使用量 |
 | `suppression_list` | 営業拒否 / 配信停止 / 送信禁止 / 返信不要 の抑止リスト（企業・メール・ドメイン単位） |
 | `services`, `campaigns`, `email_templates`, `email_messages`, `email_replies`, `contacts`, `activities` | Phase 4 以降用（空でも動作） |
-| ビュー `company_overview` | 企業 + 最新分析をフラット化（一覧・CSV・ダッシュボード用、`security_invoker`） |
-| RPC `claim_job` | `FOR UPDATE SKIP LOCKED` でジョブを取得し、同時実行時の二重処理を防止。stale な processing を自動復旧 |
-| RPC `increment_search_job_counters`, `dashboard_stats` | カウンタ加算 / ダッシュボード集計 |
+| ビュー `company_overview` | 企業 + 最新分析をフラット化（一覧・CSV・ダッシュボード用） |
+| 関数 `claim_job` | `FOR UPDATE SKIP LOCKED` でジョブを取得し、同時実行時の二重処理を防止。stale な processing を自動復旧（Drizzle から `select claim_job(...)` で呼び出し） |
+| 関数 `increment_search_job_counters`, `dashboard_stats` | カウンタのアトミック加算 / ダッシュボード集計 |
+| トリガー `set_updated_at` | `updated_at` の自動更新 |
 
 ## 12. 処理フローとジョブキュー
 
@@ -327,13 +373,14 @@ npm run build       # next build
 ## 15. Vercel デプロイ方法
 
 1. GitHub リポジトリを Vercel にインポート（Framework: Next.js）
-2. **Environment Variables** に「9. 環境変数一覧」の値を設定
-   - `DATA_MODE=live`, `AUTH_MODE=supabase`
+2. **Environment Variables** に「9. 環境変数一覧」の値を設定（Neon Console の **Integrations > Vercel** を使うと `DATABASE_URL` 等を自動で同期できます）
+   - `DATABASE_URL`, `NEON_AUTH_BASE_URL`, `NEON_AUTH_COOKIE_SECRET`
+   - `DATA_MODE=live`, `AUTH_MODE=neon`
    - `CRON_SECRET` に長いランダム文字列を設定（Vercel Cron はこの値を `Authorization: Bearer` で送信）
    - `JOB_SECRET` も設定（外部スケジューラから叩く場合）
 3. デプロイ。`vercel.json` の Cron（毎分 `/api/cron/process-jobs`）が自動登録されます
    - Hobby プランは Cron が 1日1回に制限されます。その場合は検索進捗画面のポーリング / 外部スケジューラ（例: cron-job.org から `POST /api/jobs/process` に `Authorization: Bearer <JOB_SECRET>`）で補ってください
-4. `APP_URL` を本番 URL に、Supabase の **Authentication > URL Configuration > Site URL** も本番 URL に設定
+4. `APP_URL` を本番 URL に設定
 5. 関数実行時間: Route Handler は `maxDuration = 300` を指定済み。Hobby プランでは最大 60 秒のため `JOB_MAX_RUNTIME_MS=45000` 程度に下げてください
 
 ## 16. トラブルシューティング
@@ -341,8 +388,10 @@ npm run build       # next build
 | 症状 | 原因 / 対処 |
 | --- | --- |
 | `環境変数 XXX が設定されていません` | `.env.local` または Vercel の環境変数を確認。`DATA_MODE=mock` なら GBIZ / ANTHROPIC キーは不要 |
-| ログインできない | Supabase Dashboard > Authentication > Users でユーザーを作成しているか。Email プロバイダが有効か |
-| `/login` にリダイレクトされ続ける | `NEXT_PUBLIC_SUPABASE_URL` / `ANON_KEY` が正しいか。ブラウザの Cookie を削除して再ログイン |
+| ログインできない | Neon Console > Auth > Users でユーザーを作成しているか。`NEON_AUTH_BASE_URL` が正しいか |
+| `/login` にリダイレクトされ続ける | `NEON_AUTH_COOKIE_SECRET` が 32 文字以上か。ブラウザの Cookie を削除して再ログイン |
+| `DATABASE_URL が設定されていません` | `.env.local` / Vercel に Neon の接続文字列を設定。`npm run db:migrate` を実行済みか |
+| `relation "companies" does not exist` | マイグレーション未適用。`npm run db:migrate` |
 | 検索を開始しても進まない | ジョブ画面の「今すぐ処理を実行」か `npm run jobs:run` を実行。Vercel では Cron / `CRON_SECRET` を確認。ログ画面の `error` を確認 |
 | 企業が「要確認」になる | 公式サイト信頼度が閾値（60）未満。詳細画面で候補を確認し「公式に設定」 |
 | 企業が「HPなし」になる | GビズINFO に URL が無く Google Places も未設定/該当なし。詳細画面で手入力 |
@@ -351,7 +400,7 @@ npm run build       # next build
 | クロールが `robots.txt によりクロール不可` | 対象サイトがクロール禁止。手動でサイト内容を確認する運用に |
 | 文字化け | Shift_JIS / EUC-JP は自動判定。`content-type` / `<meta charset>` が無いサイトは UTF-8 として処理 |
 | CSV が Excel で文字化け | UTF-8 BOM 付きで出力済み。Excel で開けない場合は「データ > テキストから」で UTF-8 を指定 |
-| RLS でデータが見えない | 認証済みユーザーでアクセスしているか。バッチは `SUPABASE_SERVICE_ROLE_KEY` を使用 |
+| Neon の接続数エラー | 本番は `@neondatabase/serverless` の HTTP ドライバ（接続を保持しない）を使用。`-pooler` 付きの接続文字列を推奨 |
 
 ## 17. 未実装機能と次フェーズ
 

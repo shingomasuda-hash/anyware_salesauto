@@ -1,4 +1,5 @@
-import type { AdminClient } from "@/lib/supabase/admin";
+import type { Db } from "@/db";
+import { findDedupeCandidates } from "@/db/repositories/companies";
 import { normalizeAddress, normalizeCompanyName } from "./normalize";
 
 /** 重複判定に必要な最小限の企業情報 */
@@ -52,23 +53,12 @@ export function matchDuplicate(candidate: DedupeCandidate, existing: DedupeExist
  * DB を参照して重複企業を探す。
  * 3条件それぞれで候補を引いてから matchDuplicate で優先順位判定する。
  */
-export async function findDuplicateCompany(db: AdminClient, candidate: DedupeCandidate): Promise<DedupeMatch | null> {
-  const nameNorm = normalizeCompanyName(candidate.companyName);
-  const addrNorm = normalizeAddress(candidate.address);
-  const cn = candidate.corporateNumber ?? null;
-  const domain = candidate.websiteDomain ?? null;
-
-  const filters: string[] = [];
-  if (cn) filters.push(`corporate_number.eq.${cn}`);
-  if (domain) filters.push(`website_domain.eq.${domain}`);
-  if (nameNorm && addrNorm) filters.push(`and(company_name_normalized.eq.${nameNorm},address_normalized.eq.${addrNorm})`);
-  if (filters.length === 0) return null;
-
-  const { data, error } = await db
-    .from("companies")
-    .select("id, corporate_number, website_domain, company_name_normalized, address_normalized")
-    .or(filters.join(","))
-    .limit(10);
-  if (error) throw new Error(`重複判定クエリ失敗: ${error.message}`);
-  return matchDuplicate(candidate, data ?? []);
+export async function findDuplicateCompany(db: Db, candidate: DedupeCandidate): Promise<DedupeMatch | null> {
+  const existing = await findDedupeCandidates(db, {
+    corporateNumber: candidate.corporateNumber ?? null,
+    domain: candidate.websiteDomain ?? null,
+    nameNorm: normalizeCompanyName(candidate.companyName),
+    addrNorm: normalizeAddress(candidate.address),
+  });
+  return matchDuplicate(candidate, existing);
 }

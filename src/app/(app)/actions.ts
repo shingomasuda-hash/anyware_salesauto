@@ -2,6 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { getDb } from "@/db";
+import type { Json } from "@/db/types";
+import { getCompanyById, findCompanyByDomainExcluding, updateCompany } from "@/db/repositories/companies";
+import { countCompanyPages } from "@/db/repositories/pages";
+import { cancelSearchJob } from "@/db/repositories/jobs";
+import { deleteSuppression, ensureSuppression } from "@/db/repositories/suppression";
 import { getGbizProvider } from "@/lib/integrations/gbiz";
 import { registerCompany } from "@/lib/companies/register";
 import { extractDomain, normalizeUrl } from "@/lib/companies/normalize";
@@ -10,18 +16,19 @@ import { createSearchJob, enqueueAnalysisJob, enqueueCrawlJob, retryFailedJobs }
 import { kickJobProcessing } from "@/lib/jobs/kick";
 import { processJobs } from "@/lib/jobs/runner";
 import { describeConditions, searchConditionsSchema, toSearchConditions } from "@/lib/jobs/search-conditions";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { requireUser } from "@/lib/supabase/auth";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getAuth } from "@/lib/auth/server";
+import { requireUser } from "@/lib/auth/session";
 import { isAuthDisabled } from "@/lib/config/env";
-import type { Json } from "@/lib/db/types";
 
 export type ActionState = { ok: boolean; message?: string; errors?: Record<string, string> } | null;
 
 export async function signOutAction() {
   if (!isAuthDisabled()) {
-    const supabase = await createSupabaseServerClient();
-    await supabase.auth.signOut();
+    try {
+      await getAuth().signOut();
+    } catch (err) {
+      console.error("[auth] signOut failed", err);
+    }
   }
   redirect("/login");
 }
@@ -40,7 +47,7 @@ export async function createSearchJobAction(_prev: ActionState, formData: FormDa
   if (conditions.employeeMin !== undefined && conditions.employeeMax !== undefined && conditions.employeeMin > conditions.employeeMax) {
     return { ok: false, message: "従業員数の下限が上限を超えています", errors: { employeeMin: "下限 ≤ 上限 にしてください" } };
   }
-  const db = createSupabaseAdminClient();
+  const db = getDb();
   const logger = new Logger(db, { category: "search" });
   let jobId: string;
   try {
@@ -72,7 +79,7 @@ export async function addCompanyAction(_prev: ActionState, formData: FormData): 
   if (corporateNumber && corporateNumber.length !== 13) errors.corporateNumber = "法人番号は13桁です";
   if (Object.keys(errors).length > 0) return { ok: false, message: "入力内容を確認してください", errors };
 
-  const db = createSupabaseAdminClient();
+  const db = getDb();
   const logger = new Logger(db, { category: "company" });
   let companyId: string;
   let duplicate = false;
@@ -88,10 +95,7 @@ export async function addCompanyAction(_prev: ActionState, formData: FormData): 
       // 既存企業に URL が無ければ候補として追加
       const existing = (result.company.website_candidates as unknown as { url: string; source: string }[]) ?? [];
       if (!existing.some((c) => c.url === websiteUrl)) {
-        await db
-          .from("companies")
-          .update({ website_candidates: [...existing, { url: websiteUrl, source: "manual" }] as unknown as Json })
-          .eq("id", companyId);
+        await updateCompany(db, companyId, { website_candidates: [...existing, { url: websiteUrl, source: "manual" }] as unknown as Json });
       }
     }
     if (websiteUrl || result.company.website_url || (result.company.website_candidates as unknown[]).length > 0) {
@@ -109,8 +113,8 @@ export async function addCompanyAction(_prev: ActionState, formData: FormData): 
 /** 再解析: サイト再クロール → AI 再分析 */
 export async function reanalyzeCompanyAction(companyId: string): Promise<ActionState> {
   await requireUser();
-  const db = createSupabaseAdminClient();
-  const { data: company } = await db.from("companies").select("id, website_url, website_candidates, verification_status").eq("id", companyId).single();
+  const db = getDb();
+  const company = await getCompanyById(db, companyId);
   if (!company) return { ok: false, message: "企業が見つかりません" };
   const hasCandidate = Boolean(company.website_url) || ((company.website_candidates as unknown[]) ?? []).length > 0;
   if (!hasCandidate) return { ok: false, message: "公式サイトURLが未設定のため再解析できません。先に公式サイトを設定してください。" };
@@ -125,8 +129,8 @@ export async function reanalyzeCompanyAction(companyId: string): Promise<ActionS
 /** クロール済みだが未分析の企業を AI 分析のみ再実行 */
 export async function analyzeOnlyAction(companyId: string): Promise<ActionState> {
   await requireUser();
-  const db = createSupabaseAdminClient();
-  const { count } = await db.from("company_pages").select("id", { count: "exact", head: true }).eq("company_id", companyId);
+  const db = getDb();
+  const count = await countCompanyPages(db, companyId);
   if (!count) return { ok: false, message: "クロール済みページがありません。再解析（クロール込み）を実行してください。" };
   await enqueueAnalysisJob(db, companyId, { priority: 20 });
   kickJobProcessing();
@@ -140,14 +144,14 @@ export async function setOfficialSiteAction(companyId: string, url: string): Pro
   const normalized = normalizeUrl(url);
   const domain = extractDomain(normalized);
   if (!normalized || !domain) return { ok: false, message: "URL の形式が正しくありません" };
-  const db = createSupabaseAdminClient();
-  const { data: conflict } = await db.from("companies").select("id, company_name").eq("website_domain", domain).neq("id", companyId).limit(1);
-  if (conflict && conflict.length > 0) return { ok: false, message: `このドメインは「${conflict[0].company_name}」に登録済みです（重複）` };
-  const { error } = await db
-    .from("companies")
-    .update({ website_url: normalized, website_domain: domain, verification_status: "manual", official_site_confidence: 100, crawl_status: "not_crawled" })
-    .eq("id", companyId);
-  if (error) return { ok: false, message: error.message };
+  const db = getDb();
+  const conflict = await findCompanyByDomainExcluding(db, domain, companyId);
+  if (conflict) return { ok: false, message: `このドメインは「${conflict.company_name}」に登録済みです（重複）` };
+  try {
+    await updateCompany(db, companyId, { website_url: normalized, website_domain: domain, verification_status: "manual", official_site_confidence: 100, crawl_status: "not_crawled" });
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : "更新に失敗しました" };
+  }
   await enqueueCrawlJob(db, companyId, { enqueueAnalysis: true, priority: 20 });
   await new Logger(db, { category: "company", companyId }).info("公式サイトを手動設定", { url: normalized });
   kickJobProcessing();
@@ -158,14 +162,16 @@ export async function setOfficialSiteAction(companyId: string, url: string): Pro
 /** 営業可否を手動で上書き */
 export async function setSalesContactAllowedAction(companyId: string, value: "true" | "false" | "unknown"): Promise<ActionState> {
   await requireUser();
-  const db = createSupabaseAdminClient();
-  const { error } = await db.from("companies").update({ sales_contact_allowed: value }).eq("id", companyId);
-  if (error) return { ok: false, message: error.message };
+  const db = getDb();
+  try {
+    await updateCompany(db, companyId, { sales_contact_allowed: value });
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : "更新に失敗しました" };
+  }
   if (value === "false") {
-    const { data: existing } = await db.from("suppression_list").select("id").eq("company_id", companyId).eq("reason", "manual").limit(1);
-    if (!existing || existing.length === 0) await db.from("suppression_list").insert({ company_id: companyId, reason: "manual", note: "画面から手動設定" });
+    await ensureSuppression(db, { companyId, reason: "manual", note: "画面から手動設定" });
   } else {
-    await db.from("suppression_list").delete().eq("company_id", companyId).eq("reason", "manual");
+    await deleteSuppression(db, companyId, "manual");
   }
   revalidatePath(`/companies/${companyId}`);
   return { ok: true, message: "営業可否を更新しました" };
@@ -173,7 +179,7 @@ export async function setSalesContactAllowedAction(companyId: string, value: "tr
 
 export async function retryFailedJobsAction(scope: { searchJobId?: string; companyId?: string; jobType?: "crawl" | "analysis" | "search" }): Promise<ActionState> {
   await requireUser();
-  const db = createSupabaseAdminClient();
+  const db = getDb();
   const result = await retryFailedJobs(db, scope);
   const total = result.crawl + result.analysis + result.search;
   if (total > 0) kickJobProcessing();
@@ -185,10 +191,7 @@ export async function retryFailedJobsAction(scope: { searchJobId?: string; compa
 
 export async function cancelSearchJobAction(searchJobId: string): Promise<ActionState> {
   await requireUser();
-  const db = createSupabaseAdminClient();
-  await db.from("search_jobs").update({ status: "cancelled", completed_at: new Date().toISOString(), locked_at: null }).eq("id", searchJobId).in("status", ["pending", "processing", "retrying"]);
-  await db.from("crawl_jobs").update({ status: "cancelled" }).eq("search_job_id", searchJobId).in("status", ["pending", "retrying"]);
-  await db.from("analysis_jobs").update({ status: "cancelled" }).eq("search_job_id", searchJobId).in("status", ["pending", "retrying"]);
+  await cancelSearchJob(getDb(), searchJobId);
   revalidatePath(`/search/${searchJobId}`);
   revalidatePath("/jobs");
   return { ok: true, message: "検索ジョブをキャンセルしました" };

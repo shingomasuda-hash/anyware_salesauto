@@ -1,5 +1,5 @@
-import { getCurrentUser } from "@/lib/supabase/auth";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { getCurrentUser } from "@/lib/auth/session";
+import { getDb } from "@/db";
 import { parseCompanyFilters } from "@/lib/companies/filters";
 import { companiesToCsv } from "@/lib/companies/csv";
 import { listCompaniesForExport } from "@/lib/companies/queries";
@@ -14,7 +14,7 @@ export async function GET(request: Request) {
   const params: Record<string, string> = {};
   url.searchParams.forEach((v, k) => (params[k] = v));
   const filters = parseCompanyFilters(params);
-  const rows = await listCompaniesForExport(createSupabaseAdminClient(), filters);
+  const rows = await listCompaniesForExport(getDb(), filters);
   const csv = companiesToCsv(rows);
   const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   return new Response(csv, {

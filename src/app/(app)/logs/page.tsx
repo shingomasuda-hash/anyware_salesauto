@@ -4,7 +4,8 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { NativeSelect } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { getRequestDb } from "@/lib/supabase/request-db";
+import { getDb } from "@/db";
+import { listAiUsageLogsWithCompany, listSystemLogs } from "@/db/repositories/logs";
 import { formatDate, formatNumber } from "@/lib/utils/format";
 
 export const dynamic = "force-dynamic";
@@ -15,14 +16,13 @@ const LEVELS = ["info", "warn", "error"];
 
 export default async function LogsPage({ searchParams }: { searchParams: Promise<{ category?: string; level?: string; tab?: string }> }) {
   const sp = await searchParams;
-  const db = await getRequestDb();
+  const db = getDb();
   const tab = sp.tab === "ai" ? "ai" : "system";
-
-  let q = db.from("system_logs").select("*").order("created_at", { ascending: false }).limit(200);
-  if (sp.category) q = q.eq("category", sp.category);
-  if (sp.level && LEVELS.includes(sp.level)) q = q.eq("level", sp.level as "info" | "warn" | "error");
-  const [logs, usage] = await Promise.all([tab === "system" ? q : Promise.resolve({ data: [] }), tab === "ai" ? db.from("ai_usage_logs").select("*, companies(company_name)").order("created_at", { ascending: false }).limit(200) : Promise.resolve({ data: [] })]);
-  const usageRows = usage.data ?? [];
+  const level = sp.level && LEVELS.includes(sp.level) ? (sp.level as "info" | "warn" | "error") : undefined;
+  const [logs, usageRows] = await Promise.all([
+    tab === "system" ? listSystemLogs(db, { category: sp.category || undefined, level, limit: 200 }) : Promise.resolve([]),
+    tab === "ai" ? listAiUsageLogsWithCompany(db, 200) : Promise.resolve([]),
+  ]);
   const totals = usageRows.reduce(
     (acc, r) => ({ input: acc.input + r.input_tokens, output: acc.output + r.output_tokens, cacheRead: acc.cacheRead + r.cache_read_tokens }),
     { input: 0, output: 0, cacheRead: 0 },
@@ -76,14 +76,14 @@ export default async function LogsPage({ searchParams }: { searchParams: Promise
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(logs.data ?? []).length === 0 ? (
+                {logs.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
                       ログはありません
                     </TableCell>
                   </TableRow>
                 ) : (
-                  (logs.data ?? []).map((l) => (
+                  logs.map((l) => (
                     <TableRow key={l.id}>
                       <TableCell className="text-muted-foreground">{formatDate(l.created_at, true)}</TableCell>
                       <TableCell>

@@ -1,4 +1,4 @@
-import type { SalesRank } from "@/lib/db/types";
+import type { SalesRank } from "@/db/types";
 
 export interface SubScores {
   recruitment_issue_score: number | null;

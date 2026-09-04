@@ -10,7 +10,7 @@ import { OfficialSiteForm, type SiteCandidate } from "@/components/companies/off
 import { BulletList, DefinitionList, ExternalA, ScoreTile, Section } from "@/components/companies/detail-sections";
 import { employeeRangeLabel, industryLabel, SALES_RANKS } from "@/lib/companies/constants";
 import { getCompanyDetail } from "@/lib/companies/queries";
-import { getRequestDb } from "@/lib/supabase/request-db";
+import { getDb } from "@/db";
 import { formatDate, formatNumber } from "@/lib/utils/format";
 
 export const dynamic = "force-dynamic";
@@ -34,7 +34,7 @@ const PAGE_TYPE_LABEL: Record<string, string> = {
 export default async function CompanyDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ created?: string; duplicate?: string }> }) {
   const { id } = await params;
   const sp = await searchParams;
-  const db = await getRequestDb();
+  const db = getDb();
   const detail = await getCompanyDetail(db, id);
   if (!detail) notFound();
   const { company: c, analysis: a, evidence, pages, crawlJobs, analysisJobs, analysisHistory } = detail;

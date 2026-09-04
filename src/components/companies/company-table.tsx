@@ -3,7 +3,7 @@ import { ExternalLink } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ContactAllowedBadge, RankBadge, ScoreCell, YesNo } from "./badges";
 import { employeeRangeLabel, industryLabel } from "@/lib/companies/constants";
-import type { CompanyOverviewRow } from "@/lib/db/types";
+import type { CompanyOverviewRow } from "@/db/types";
 import { formatDate } from "@/lib/utils/format";
 
 export function CompanyTable({ rows }: { rows: CompanyOverviewRow[] }) {

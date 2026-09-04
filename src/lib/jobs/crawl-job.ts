@@ -1,5 +1,8 @@
-import type { AdminClient } from "@/lib/supabase/admin";
-import type { CompanyRow, CrawlJobRow, Json } from "@/lib/db/types";
+import type { Db } from "@/db";
+import type { CompanyInsert, CompanyRow, CrawlJobRow, Json } from "@/db/types";
+import { findCompanyByDomainExcluding, getCompanyById, updateCompany } from "@/db/repositories/companies";
+import { replaceCompanyPages } from "@/db/repositories/pages";
+import { ensureSuppression } from "@/db/repositories/suppression";
 import { getCrawlerConfig } from "@/lib/config/crawler";
 import { extractDomain, normalizeUrl } from "@/lib/companies/normalize";
 import { decideOfficialSite, isNonOfficialDomain, type OfficialSiteCandidate, type OfficialSiteScore } from "@/lib/companies/official-site";
@@ -30,25 +33,22 @@ export interface CrawlJobResult {
 /**
  * クロールジョブ: 公式サイト特定 → クロール → 連絡先/SNS/営業拒否の抽出 → 保存 → 分析ジョブ投入
  */
-export async function processCrawlJob(db: AdminClient, job: CrawlJobRow, logger: Logger): Promise<CrawlJobResult> {
-  const { data: company, error } = await db.from("companies").select("*").eq("id", job.company_id).single();
-  if (error || !company) throw new Error(`企業が見つかりません: ${job.company_id}`);
+export async function processCrawlJob(db: Db, job: CrawlJobRow, logger: Logger): Promise<CrawlJobResult> {
+  const company = await getCompanyById(db, job.company_id);
+  if (!company) throw new Error(`企業が見つかりません: ${job.company_id}`);
 
-  await db.from("companies").update({ crawl_status: "crawling" }).eq("id", company.id);
+  await updateCompany(db, company.id, { crawl_status: "crawling" });
 
   // 1) 公式サイトの特定
   const site = await resolveOfficialSite(db, company, logger);
   if (site.status !== "verified" || !site.url) {
     const status = site.status === "needs_review" ? "needs_review" : "no_website";
-    await db
-      .from("companies")
-      .update({
-        verification_status: status,
-        crawl_status: status === "no_website" ? "no_website" : "not_crawled",
-        website_candidates: site.candidates as unknown as Json,
-        official_site_confidence: site.best?.confidence ?? null,
-      })
-      .eq("id", company.id);
+    await updateCompany(db, company.id, {
+      verification_status: status,
+      crawl_status: status === "no_website" ? "no_website" : "not_crawled",
+      website_candidates: site.candidates as unknown as Json,
+      official_site_confidence: site.best?.confidence ?? null,
+    });
     await logger.info(status === "needs_review" ? "公式サイトを断定できず要確認" : "公式サイトが見つからない", {
       best: site.best?.url,
       confidence: site.best?.confidence,
@@ -61,7 +61,7 @@ export async function processCrawlJob(db: AdminClient, job: CrawlJobRow, logger:
   await logger.info("クロールを開始", { url: site.url, maxPages: cfg.maxPages });
   const summary = await crawlSite(site.url, { maxPages: cfg.maxPages });
   if (summary.robotsBlocked) {
-    await db.from("companies").update({ crawl_status: "failed", last_crawled_at: new Date().toISOString() }).eq("id", company.id);
+    await updateCompany(db, company.id, { crawl_status: "failed", last_crawled_at: new Date().toISOString() });
     await logger.warn("robots.txt によりクロール不可", { url: site.url });
     return { outcome: "robots_blocked", websiteUrl: site.url };
   }
@@ -70,7 +70,6 @@ export async function processCrawlJob(db: AdminClient, job: CrawlJobRow, logger:
   }
 
   // 3) ページ保存（raw HTML は保存しない）
-  await db.from("company_pages").delete().eq("company_id", company.id);
   const now = new Date().toISOString();
   const rows = summary.pages.map((p) => ({
     company_id: company.id,
@@ -84,25 +83,20 @@ export async function processCrawlJob(db: AdminClient, job: CrawlJobRow, logger:
   }));
   // 同一 URL の重複を除去
   const uniqueRows = Array.from(new Map(rows.map((r) => [r.url, r])).values());
-  const { error: pErr } = await db.from("company_pages").insert(uniqueRows);
-  if (pErr) throw new Error(`ページの保存に失敗: ${pErr.message}`);
+  await replaceCompanyPages(db, company.id, uniqueRows);
 
   // 4) 企業情報の更新（連絡先 / SNS / 営業拒否）
   const update = buildCompanyUpdate(company, site, summary, now);
-  const { error: uErr } = await db.from("companies").update(update).eq("id", company.id);
-  if (uErr) throw new Error(`企業の更新に失敗: ${uErr.message}`);
+  await updateCompany(db, company.id, update);
 
   if (update.sales_contact_allowed === "false") {
-    const { data: existing } = await db.from("suppression_list").select("id").eq("company_id", company.id).eq("reason", "sales_restriction_detected").limit(1);
-    if (!existing || existing.length === 0) {
-      await db.from("suppression_list").insert({
-        company_id: company.id,
-        domain: site.domain,
-        reason: "sales_restriction_detected",
-        note: update.sales_restriction_text ?? null,
-        source_url: update.sales_restriction_source_url ?? null,
-      });
-    }
+    await ensureSuppression(db, {
+      companyId: company.id,
+      reason: "sales_restriction_detected",
+      domain: site.domain,
+      note: update.sales_restriction_text ?? null,
+      sourceUrl: update.sales_restriction_source_url ?? null,
+    });
   }
 
   await logger.info("クロールが完了", {
@@ -135,7 +129,7 @@ interface ResolvedSite {
  * - 候補（GビズINFO URL / 手動入力 / Google Places）のトップページを取得してスコアリング
  * - 閾値未満は要確認として保存しない
  */
-async function resolveOfficialSite(db: AdminClient, company: CompanyRow, logger: Logger): Promise<ResolvedSite> {
+async function resolveOfficialSite(db: Db, company: CompanyRow, logger: Logger): Promise<ResolvedSite> {
   if (company.website_url && (company.verification_status === "verified" || company.verification_status === "manual")) {
     return {
       status: "verified",
@@ -202,9 +196,9 @@ async function resolveOfficialSite(db: AdminClient, company: CompanyRow, logger:
   // ドメインが他社に登録済みなら要確認（重複防止）
   const domain = decision.best.domain;
   if (domain) {
-    const { data: conflict } = await db.from("companies").select("id, company_name").eq("website_domain", domain).neq("id", company.id).limit(1);
-    if (conflict && conflict.length > 0) {
-      await logger.warn("同一ドメインが別企業に登録済みのため要確認", { domain, conflictId: conflict[0].id });
+    const conflict = await findCompanyByDomainExcluding(db, domain, company.id);
+    if (conflict) {
+      await logger.warn("同一ドメインが別企業に登録済みのため要確認", { domain, conflictId: conflict.id });
       return { status: "needs_review", url: null, domain, confidence: decision.best.confidence, best: decision.best, candidates: storedScored };
     }
   }
@@ -213,7 +207,7 @@ async function resolveOfficialSite(db: AdminClient, company: CompanyRow, logger:
   return { status: "verified", url: decision.best.url, domain, confidence: decision.best.confidence, best: decision.best, candidates: storedScored };
 }
 
-function buildCompanyUpdate(company: CompanyRow, site: ResolvedSite, summary: CrawlSummary, now: string): Partial<CompanyRow> {
+function buildCompanyUpdate(company: CompanyRow, site: ResolvedSite, summary: CrawlSummary, now: string): Partial<CompanyInsert> {
   const domain = site.domain ?? extractDomain(site.url);
   // 同一ドメインのメールを優先（サイト内に記載された公開アドレスのみ。推測生成はしない）
   const sameDomain = summary.emails.filter((e) => domain && e.endsWith(`@${domain}`));

@@ -1,54 +1,29 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { loginAction, type LoginState } from "./actions";
 
 export function LoginForm({ next }: { next: string }) {
-  const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    try {
-      const supabase = createSupabaseBrowserClient();
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        setError(error.message === "Invalid login credentials" ? "メールアドレスまたはパスワードが正しくありません" : error.message);
-        return;
-      }
-      router.replace(next.startsWith("/") ? next : "/");
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "ログインに失敗しました");
-    } finally {
-      setLoading(false);
-    }
-  }
-
+  const [state, action, pending] = useActionState<LoginState, FormData>(loginAction, null);
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
+    <form action={action} className="space-y-4">
+      <input type="hidden" name="next" value={next} />
       <div className="space-y-1.5">
         <Label htmlFor="email">メールアドレス</Label>
-        <Input id="email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+        <Input id="email" name="email" type="email" autoComplete="email" required defaultValue={state?.email ?? ""} />
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="password">パスワード</Label>
-        <Input id="password" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
+        <Input id="password" name="password" type="password" autoComplete="current-password" required />
       </div>
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
-      <Button type="submit" className="w-full" disabled={loading}>
-        {loading ? "ログイン中…" : "ログイン"}
+      {state?.error ? <p className="text-sm text-red-700">{state.error}</p> : null}
+      <Button type="submit" className="w-full" disabled={pending}>
+        {pending ? "ログイン中…" : "ログイン"}
       </Button>
-      <p className="text-xs text-muted-foreground">ユーザーは Supabase Dashboard の Authentication から作成してください。</p>
+      <p className="text-xs text-muted-foreground">ユーザーは Neon Console の Auth（Users）から作成してください。</p>
     </form>
   );
 }

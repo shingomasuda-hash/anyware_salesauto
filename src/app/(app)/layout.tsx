@@ -1,10 +1,13 @@
 import { LogOut } from "lucide-react";
-import { requireUser } from "@/lib/supabase/auth";
+import { requireUser } from "@/lib/auth/session";
 import { isAuthDisabled } from "@/lib/config/env";
 import { SidebarNav } from "@/components/layout/sidebar";
 import { ModeBanner } from "@/components/layout/mode-banner";
 import { Button } from "@/components/ui/button";
 import { signOutAction } from "./actions";
+
+// 全管理画面はセッション（cookies）に依存するため常に動的レンダリング
+export const dynamic = "force-dynamic";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();

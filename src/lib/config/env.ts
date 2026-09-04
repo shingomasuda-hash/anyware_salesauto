@@ -2,7 +2,8 @@ import { z } from "zod";
 
 /**
  * 環境変数の一元管理。
- * - サーバー専用の値はここからしか読まない（クライアントへの露出防止）
+ * - サーバー専用の値（DATABASE_URL / NEON_AUTH_COOKIE_SECRET / 各APIキー）はここからしか読まない
+ *   （NEXT_PUBLIC_ を付けないためブラウザ bundle に含まれない）
  * - 未設定でも開発が止まらないよう、必須チェックは "利用時" に行う（requireEnv）
  */
 const optionalString = z
@@ -14,11 +15,12 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   APP_URL: optionalString,
   DATA_MODE: z.enum(["live", "mock"]).optional(),
-  AUTH_MODE: z.enum(["supabase", "disabled"]).optional(),
+  AUTH_MODE: z.enum(["neon", "disabled"]).optional(),
 
-  NEXT_PUBLIC_SUPABASE_URL: optionalString,
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: optionalString,
-  SUPABASE_SERVICE_ROLE_KEY: optionalString,
+  DATABASE_URL: optionalString,
+  DB_DRIVER: z.enum(["neon", "pg"]).optional(),
+  NEON_AUTH_BASE_URL: optionalString,
+  NEON_AUTH_COOKIE_SECRET: optionalString,
 
   ANTHROPIC_API_KEY: optionalString,
   ANTHROPIC_MODEL: z.string().default("claude-opus-5"),
@@ -89,7 +91,12 @@ export function requireEnv<K extends keyof Env>(key: K): NonNullable<Env[K]> {
   return value as NonNullable<Env[K]>;
 }
 
-export function hasSupabaseConfig(): boolean {
+/** Neon Auth が設定済みか（未設定 + AUTH_MODE=disabled の開発モードを許容するため） */
+export function hasNeonAuthConfig(): boolean {
   const env = getEnv();
-  return Boolean(env.NEXT_PUBLIC_SUPABASE_URL && env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+  return Boolean(env.NEON_AUTH_BASE_URL && env.NEON_AUTH_COOKIE_SECRET && env.NEON_AUTH_COOKIE_SECRET.length >= 32);
+}
+
+export function hasDatabaseConfig(): boolean {
+  return Boolean(getEnv().DATABASE_URL);
 }

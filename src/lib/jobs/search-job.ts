@@ -1,5 +1,6 @@
-import type { AdminClient } from "@/lib/supabase/admin";
-import type { Json, SearchJobRow } from "@/lib/db/types";
+import type { Db } from "@/db";
+import type { Json, SearchJobRow } from "@/db/types";
+import { incrementSearchJobCounters, insertSearchJobItem, updateSearchJob } from "@/db/repositories/jobs";
 import { registerCompany } from "@/lib/companies/register";
 import { getGbizProvider, mapGbizToCompanyInput, matchesConditions, type GbizHojin } from "@/lib/integrations/gbiz";
 import { getPlacesProvider } from "@/lib/integrations/google-places";
@@ -23,7 +24,7 @@ export type StepOutcome = "continue" | "completed" | "failed";
  * GビズINFO からページ単位で候補を取得し、条件フィルタ → 重複判定 → 登録 → クロールジョブ投入。
  * 時間切れ or 上限ページ数に達したら cursor を保存して "continue" を返す（次回呼び出しで再開）。
  */
-export async function processSearchJobStep(db: AdminClient, job: SearchJobRow, logger: Logger, deadline: number): Promise<StepOutcome> {
+export async function processSearchJobStep(db: Db, job: SearchJobRow, logger: Logger, deadline: number): Promise<StepOutcome> {
   const conditions = parseStoredConditions(job.conditions);
   const cursor = (job.cursor ?? {}) as SearchCursor;
   const provider = getGbizProvider();
@@ -35,7 +36,7 @@ export async function processSearchJobStep(db: AdminClient, job: SearchJobRow, l
 
   if (job.attempts === 1 && !cursor.page) {
     await logger.info("企業検索を開始", { conditions, provider: provider.name });
-    await db.from("search_jobs").update({ provider: provider.name }).eq("id", job.id);
+    await updateSearchJob(db, job.id, { provider: provider.name });
   }
 
   try {
@@ -47,7 +48,7 @@ export async function processSearchJobStep(db: AdminClient, job: SearchJobRow, l
         cursor.done = true;
         break;
       }
-      await db.rpc("increment_search_job_counters", { p_job_id: job.id, p_found: result.items.length });
+      await incrementSearchJobCounters(db, job.id, { found: result.items.length });
 
       for (const item of result.items) {
         if (registered >= job.requested_count) break;
@@ -99,13 +100,13 @@ export async function processSearchJobStep(db: AdminClient, job: SearchJobRow, l
           registered++;
           if (reg.status === "new") {
             await recordItem(db, job.id, item, "new", null, reg.company.id);
-            await db.rpc("increment_search_job_counters", { p_job_id: job.id, p_registered: 1, p_new: 1 });
+            await incrementSearchJobCounters(db, job.id, { registered: 1, new: 1 });
             if (reg.company.verification_status !== "no_website" || !conditions.requireWebsite) {
               await enqueueCrawlJob(db, reg.company.id, { searchJobId: job.id, enqueueAnalysis: true });
             }
           } else {
             await recordItem(db, job.id, item, "duplicate", reg.reason, reg.company.id);
-            await db.rpc("increment_search_job_counters", { p_job_id: job.id, p_registered: 1, p_duplicate: 1 });
+            await incrementSearchJobCounters(db, job.id, { registered: 1, duplicate: 1 });
             // 既存企業でも未クロール / 未分析なら処理に載せる
             if (reg.company.crawl_status === "not_crawled" && reg.company.verification_status !== "no_website") {
               await enqueueCrawlJob(db, reg.company.id, { searchJobId: job.id, enqueueAnalysis: true });
@@ -114,7 +115,7 @@ export async function processSearchJobStep(db: AdminClient, job: SearchJobRow, l
         } catch (err) {
           await logger.error("企業登録に失敗", { companyName: name, ...serializeError(err) });
           await recordItem(db, job.id, item, "failed", err instanceof Error ? err.message : String(err), null);
-          await db.rpc("increment_search_job_counters", { p_job_id: job.id, p_failed: 1 });
+          await incrementSearchJobCounters(db, job.id, { failed: 1 });
         }
       }
 
@@ -127,13 +128,13 @@ export async function processSearchJobStep(db: AdminClient, job: SearchJobRow, l
     }
   } catch (err) {
     await logger.error("企業検索でエラー", serializeError(err));
-    await db.from("search_jobs").update({ cursor: { ...cursor, page } as Json, error: err instanceof Error ? err.message : String(err) }).eq("id", job.id);
+    await updateSearchJob(db, job.id, { cursor: { ...cursor, page } as Json, error: err instanceof Error ? err.message : String(err) });
     throw err;
   }
 
   cursor.page = page;
   const finished = cursor.done || registered >= job.requested_count;
-  await db.from("search_jobs").update({ cursor: cursor as Json }).eq("id", job.id);
+  await updateSearchJob(db, job.id, { cursor: cursor as Json });
   if (finished) {
     await logger.info("企業検索が完了", { registered, requested: job.requested_count, pages: page });
     return "completed";
@@ -141,8 +142,8 @@ export async function processSearchJobStep(db: AdminClient, job: SearchJobRow, l
   return "continue";
 }
 
-async function recordItem(db: AdminClient, jobId: string, item: GbizHojin, status: "new" | "duplicate" | "skipped" | "failed", reason: string | null, companyId: string | null) {
-  await db.from("search_job_items").insert({
+async function recordItem(db: Db, jobId: string, item: GbizHojin, status: "new" | "duplicate" | "skipped" | "failed", reason: string | null, companyId: string | null) {
+  await insertSearchJobItem(db, {
     search_job_id: jobId,
     company_id: companyId,
     corporate_number: item.corporate_number ?? null,

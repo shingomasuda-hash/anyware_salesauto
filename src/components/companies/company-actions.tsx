@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/select";
 import { analyzeOnlyAction, reanalyzeCompanyAction, setSalesContactAllowedAction } from "@/app/(app)/actions";
-import type { SalesContactAllowed } from "@/lib/db/types";
+import type { SalesContactAllowed } from "@/db/types";
 
 export function ReanalyzeButton({ companyId, disabled }: { companyId: string; disabled?: boolean }) {
   const [pending, start] = useTransition();

@@ -2,7 +2,8 @@ import Link from "next/link";
 import { PageHeader } from "@/components/layout/page-header";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { JobStatusBadge } from "@/components/companies/badges";
-import { getRequestDb } from "@/lib/supabase/request-db";
+import { getDb } from "@/db";
+import { listSearchJobs } from "@/db/repositories/jobs";
 import { formatDate } from "@/lib/utils/format";
 import { SearchForm } from "./search-form";
 
@@ -10,8 +11,7 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "企業を探す" };
 
 export default async function SearchPage() {
-  const db = await getRequestDb();
-  const { data: jobs } = await db.from("search_jobs").select("id, name, status, requested_count, registered_count, new_count, created_at").order("created_at", { ascending: false }).limit(10);
+  const jobs = await listSearchJobs(getDb(), 10);
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <div>
@@ -31,14 +31,14 @@ export default async function SearchPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(jobs ?? []).length === 0 ? (
+              {jobs.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
                     履歴はありません
                   </TableCell>
                 </TableRow>
               ) : (
-                (jobs ?? []).map((j) => (
+                jobs.map((j) => (
                   <TableRow key={j.id}>
                     <TableCell>
                       <Link href={`/search/${j.id}`} className="hover:underline">

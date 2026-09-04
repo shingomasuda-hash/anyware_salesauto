@@ -1,6 +1,11 @@
 import { getAiConfig } from "@/lib/config/ai";
-import type { AdminClient } from "@/lib/supabase/admin";
-import type { CompanyAnalysisRow, CompanyPageRow, CompanyRow, Json } from "@/lib/db/types";
+import type { Db } from "@/db";
+import type { CompanyAnalysisRow, CompanyInsert, CompanyPageRow, CompanyRow, Json } from "@/db/types";
+import { getCompanyById, updateCompany } from "@/db/repositories/companies";
+import { listCompanyPages } from "@/db/repositories/pages";
+import { insertAnalysis, insertEvidence } from "@/db/repositories/analysis";
+import { insertAiUsageLog } from "@/db/repositories/logs";
+import { ensureSuppression } from "@/db/repositories/suppression";
 import { Logger, serializeError } from "@/lib/logging/logger";
 import { computeSalesPriorityScore, rankFromScore } from "@/lib/scoring/priority";
 import { getAiProvider } from "./index";
@@ -16,14 +21,12 @@ export interface AnalyzeCompanyResult {
  * 企業のクロール済みページを元に Claude で分析し、結果を保存する。
  * 1) コンテキスト構築（トークン節約） 2) AI 呼び出し 3) スコアリング 4) 保存 5) 使用量ログ
  */
-export async function analyzeCompany(db: AdminClient, companyId: string, logger: Logger): Promise<AnalyzeCompanyResult> {
+export async function analyzeCompany(db: Db, companyId: string, logger: Logger): Promise<AnalyzeCompanyResult> {
   const cfg = getAiConfig();
-  const { data: company, error: cErr } = await db.from("companies").select("*").eq("id", companyId).single();
-  if (cErr || !company) throw new Error(`企業が見つかりません: ${companyId}`);
+  const company = await getCompanyById(db, companyId);
+  if (!company) throw new Error(`企業が見つかりません: ${companyId}`);
 
-  const { data: pages, error: pErr } = await db.from("company_pages").select("*").eq("company_id", companyId).order("crawled_at", { ascending: false });
-  if (pErr) throw new Error(`ページ取得失敗: ${pErr.message}`);
-  const pageRows: CompanyPageRow[] = pages ?? [];
+  const pageRows: CompanyPageRow[] = await listCompanyPages(db, companyId);
   if (pageRows.filter((p) => (p.raw_text ?? "").length > 0).length === 0) {
     throw new Error("分析対象のクロール済みページがありません（先にクロールしてください）");
   }
@@ -49,7 +52,7 @@ export async function analyzeCompany(db: AdminClient, companyId: string, logger:
       },
     });
   } catch (err) {
-    await db.from("ai_usage_logs").insert({
+    await insertAiUsageLog(db, {
       company_id: companyId,
       purpose: "company_analysis",
       provider: provider.name,
@@ -68,9 +71,7 @@ export async function analyzeCompany(db: AdminClient, companyId: string, logger:
   // 営業拒否: ルール検出 or AI 検出のいずれかで false
   const restriction = resolveSalesRestriction(company, out);
 
-  const { data: analysis, error: aErr } = await db
-    .from("company_analysis")
-    .insert({
+  const analysis = await insertAnalysis(db, {
       company_id: companyId,
       company_summary: out.company_summary,
       business_summary: out.business_summary,
@@ -99,10 +100,7 @@ export async function analyzeCompany(db: AdminClient, companyId: string, logger:
       provider: result.provider,
       input_tokens: result.usage.inputTokens,
       output_tokens: result.usage.outputTokens,
-    })
-    .select("*")
-    .single();
-  if (aErr || !analysis) throw new Error(`分析結果の保存に失敗: ${aErr?.message}`);
+    });
 
   // Evidence: 与えた URL のみ許可（AI が捏造した URL は保存しない）
   const allowedUrls = new Set(context.urls);
@@ -126,12 +124,13 @@ export async function analyzeCompany(db: AdminClient, companyId: string, logger:
       evidence_text: restriction.text,
     });
   }
-  if (evidenceRows.length > 0) {
-    const { error: eErr } = await db.from("company_analysis_evidence").insert(evidenceRows);
-    if (eErr) await logger.warn("Evidence の保存に失敗", { error: eErr.message });
+  try {
+    await insertEvidence(db, evidenceRows);
+  } catch (err) {
+    await logger.warn("Evidence の保存に失敗", serializeError(err));
   }
 
-  await db.from("ai_usage_logs").insert({
+  await insertAiUsageLog(db, {
     company_id: companyId,
     analysis_id: analysis.id,
     purpose: "company_analysis",
@@ -145,7 +144,7 @@ export async function analyzeCompany(db: AdminClient, companyId: string, logger:
     success: true,
   });
 
-  const companyUpdate: Partial<CompanyRow> = {
+  const companyUpdate: Partial<CompanyInsert> = {
     latest_analysis_id: analysis.id,
     analysis_status: "analyzed",
     last_analyzed_at: analysis.analyzed_at,
@@ -156,11 +155,10 @@ export async function analyzeCompany(db: AdminClient, companyId: string, logger:
   if (company.employee_count === null && out.employee_count_observed) {
     companyUpdate.employee_count = out.employee_count_observed;
   }
-  const { error: uErr } = await db.from("companies").update(companyUpdate).eq("id", companyId);
-  if (uErr) throw new Error(`企業の更新に失敗: ${uErr.message}`);
+  await updateCompany(db, companyId, companyUpdate);
 
   if (restriction.allowed === "false") {
-    await upsertSuppression(db, companyId, restriction.text, restriction.sourceUrl);
+    await ensureSuppression(db, { companyId, reason: "sales_restriction_detected", note: restriction.text, sourceUrl: restriction.sourceUrl });
   }
 
   await logger.info("AI分析が完了", {
@@ -190,13 +188,3 @@ function resolveSalesRestriction(company: CompanyRow, out: CompanyAnalysisOutput
   return { allowed: "true", text: null, sourceUrl: null };
 }
 
-async function upsertSuppression(db: AdminClient, companyId: string, text: string | null, sourceUrl: string | null) {
-  const { data: existing } = await db.from("suppression_list").select("id").eq("company_id", companyId).eq("reason", "sales_restriction_detected").limit(1);
-  if (existing && existing.length > 0) return;
-  await db.from("suppression_list").insert({
-    company_id: companyId,
-    reason: "sales_restriction_detected",
-    note: text,
-    source_url: sourceUrl,
-  });
-}

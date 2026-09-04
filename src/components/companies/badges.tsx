@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils/cn";
-import type { JobStatus, SalesContactAllowed, SalesRank, VerificationStatus } from "@/lib/db/types";
+import type { JobStatus, SalesContactAllowed, SalesRank, VerificationStatus } from "@/db/types";
 
 export function RankBadge({ rank }: { rank: SalesRank | null | undefined }) {
   if (!rank) return <span className="text-muted-foreground">—</span>;

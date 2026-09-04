@@ -1,6 +1,7 @@
 import { z } from "zod";
-import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "@/lib/db/types";
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
+import { companyOverview } from "@/db/schema";
+import type { OverviewQuery } from "@/db/repositories/companies";
 
 const optionalStr = z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.string().optional());
 const optionalNum = z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.coerce.number().min(0).max(100).optional());
@@ -63,38 +64,56 @@ export function filtersToSearchParams(filters: Partial<CompanyFilters>): URLSear
   return sp;
 }
 
-type Client = SupabaseClient<Database>;
+const v = companyOverview;
 
-/** company_overview ビューにフィルタ・ソートを適用したクエリを組み立てる */
-export function buildCompanyQuery(db: Client, f: CompanyFilters, options: { count?: boolean; paginate?: boolean } = { count: true, paginate: true }) {
-  let q = db.from("company_overview").select("*", options.count ? { count: "exact" } : undefined);
+/** フィルタ → WHERE 条件（company_overview ビュー） */
+export function buildCompanyWhere(f: CompanyFilters): SQL | undefined {
+  const c: SQL[] = [];
   if (f.q) {
-    const term = f.q.replace(/[%,()]/g, " ").trim();
-    if (term) q = q.or(`company_name.ilike.%${term}%,website_domain.ilike.%${term}%,corporate_number.eq.${/^\d{13}$/.test(term) ? term : "0"}`);
+    const term = f.q.replace(/[%_]/g, " ").trim();
+    if (term) {
+      const like = `%${term}%`;
+      const parts: SQL[] = [ilike(v.company_name, like), ilike(v.website_domain, like)];
+      if (/^\d{13}$/.test(term)) parts.push(eq(v.corporate_number, term));
+      c.push(or(...parts)!);
+    }
   }
-  if (f.prefecture) q = q.eq("prefecture", f.prefecture);
-  if (f.industry) q = q.eq("industry", f.industry);
-  if (f.employeeRange) q = q.eq("employee_range", f.employeeRange);
-  if (f.rank) q = q.eq("sales_priority_rank", f.rank as "A" | "B" | "C" | "D");
-  if (f.minPriority !== undefined) q = q.gte("sales_priority_score", f.minPriority);
-  if (f.minRecruitIssue !== undefined) q = q.gte("recruitment_issue_score", f.minRecruitIssue);
-  if (f.maxSns !== undefined) q = q.lte("sns_activity_score", f.maxSns);
-  if (f.maxWeb !== undefined) q = q.lte("web_quality_score", f.maxWeb);
-  if (f.recruiting) q = q.eq("recruiting_status", "active");
-  if (f.hasWebsite) q = q.eq("has_website", true);
-  if (f.hasContact) q = q.eq("has_contact", true);
-  if (f.hasEmail) q = q.eq("has_email", true);
-  if (f.excludeRestricted) q = q.neq("sales_contact_allowed", "false");
-  if (f.unanalyzed) q = q.is("analysis_id", null);
-  if (f.needsReview) q = q.in("verification_status", ["needs_review", "unverified"]);
-
-  const sort = SORT_OPTIONS.find((s) => s.key === f.sort) ?? SORT_OPTIONS[0];
-  q = q.order(sort.column, { ascending: sort.ascending, nullsFirst: false });
-  if (sort.column !== "created_at") q = q.order("created_at", { ascending: false });
-
-  if (options.paginate) {
-    const from = (f.page - 1) * f.perPage;
-    q = q.range(from, from + f.perPage - 1);
-  }
-  return q;
+  if (f.prefecture) c.push(eq(v.prefecture, f.prefecture));
+  if (f.industry) c.push(eq(v.industry, f.industry));
+  if (f.employeeRange) c.push(eq(v.employee_range, f.employeeRange));
+  if (f.rank) c.push(eq(v.sales_priority_rank, f.rank as "A" | "B" | "C" | "D"));
+  if (f.minPriority !== undefined) c.push(gte(v.sales_priority_score, f.minPriority));
+  if (f.minRecruitIssue !== undefined) c.push(gte(v.recruitment_issue_score, f.minRecruitIssue));
+  if (f.maxSns !== undefined) c.push(lte(v.sns_activity_score, f.maxSns));
+  if (f.maxWeb !== undefined) c.push(lte(v.web_quality_score, f.maxWeb));
+  if (f.recruiting) c.push(eq(v.recruiting_status, "active"));
+  if (f.hasWebsite) c.push(eq(v.has_website, true));
+  if (f.hasContact) c.push(eq(v.has_contact, true));
+  if (f.hasEmail) c.push(eq(v.has_email, true));
+  if (f.excludeRestricted) c.push(ne(v.sales_contact_allowed, "false"));
+  if (f.unanalyzed) c.push(isNull(v.analysis_id));
+  if (f.needsReview) c.push(inArray(v.verification_status, ["needs_review", "unverified"]));
+  return c.length ? and(...c) : undefined;
 }
+
+/** ソート → ORDER BY（NULL は常に末尾） */
+export function buildCompanyOrderBy(f: CompanyFilters): SQL[] {
+  const sort = SORT_OPTIONS.find((s) => s.key === f.sort) ?? SORT_OPTIONS[0];
+  const col = v[sort.column as keyof typeof v] as unknown as SQL.Aliased | undefined;
+  const column = col ?? v.sales_priority_score;
+  const primary = sort.ascending ? sql`${column} asc nulls last` : sql`${column} desc nulls last`;
+  const order: SQL[] = [primary];
+  if (sort.column !== "created_at") order.push(desc(v.created_at));
+  return order;
+}
+
+export function buildOverviewQuery(f: CompanyFilters, options: { paginate: boolean; limit?: number }): OverviewQuery {
+  return {
+    where: buildCompanyWhere(f),
+    orderBy: buildCompanyOrderBy(f),
+    limit: options.paginate ? f.perPage : (options.limit ?? 5000),
+    offset: options.paginate ? (f.page - 1) * f.perPage : 0,
+  };
+}
+
+export { asc, desc };

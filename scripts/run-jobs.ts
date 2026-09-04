@@ -2,9 +2,9 @@
  * ローカル開発用ジョブランナー。
  * Vercel Cron が無い環境で `npm run jobs:run` を起動しておくと、キューを継続的に処理する。
  */
-import "dotenv/config";
 import { config } from "dotenv";
-config({ path: ".env.local", override: true });
+config({ path: ".env.local" });
+config();
 
 import { processJobs } from "../src/lib/jobs/runner";
 

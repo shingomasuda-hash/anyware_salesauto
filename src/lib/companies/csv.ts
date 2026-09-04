@@ -1,4 +1,4 @@
-import type { CompanyOverviewRow } from "@/lib/db/types";
+import type { CompanyOverviewRow } from "@/db/types";
 import { employeeRangeLabel, industryLabel } from "./constants";
 
 const COLUMNS: { header: string; value: (r: CompanyOverviewRow) => string | number | null | undefined }[] = [

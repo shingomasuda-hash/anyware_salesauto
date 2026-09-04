@@ -3,9 +3,10 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { JobStatusBadge } from "@/components/companies/badges";
 import { JobsToolbar } from "@/components/jobs/jobs-toolbar";
-import { getRequestDb } from "@/lib/supabase/request-db";
+import { getDb } from "@/db";
+import { countJobsByStatus, listFailedJobsWithCompany, listSearchJobs } from "@/db/repositories/jobs";
 import { formatDate } from "@/lib/utils/format";
-import type { JobStatus } from "@/lib/db/types";
+import type { JobStatus } from "@/db/types";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "ジョブ" };
@@ -13,17 +14,14 @@ export const metadata = { title: "ジョブ" };
 const STATUSES: JobStatus[] = ["pending", "processing", "retrying", "completed", "failed", "cancelled"];
 
 export default async function JobsPage() {
-  const db = await getRequestDb();
-  const [searchJobs, crawl, analysis, failedCrawl, failedAnalysis] = await Promise.all([
-    db.from("search_jobs").select("*").order("created_at", { ascending: false }).limit(30),
-    db.from("crawl_jobs").select("status"),
-    db.from("analysis_jobs").select("status"),
-    db.from("crawl_jobs").select("id, company_id, error, attempts, updated_at, companies(company_name)").eq("status", "failed").order("updated_at", { ascending: false }).limit(20),
-    db.from("analysis_jobs").select("id, company_id, error, attempts, updated_at, companies(company_name)").eq("status", "failed").order("updated_at", { ascending: false }).limit(20),
+  const db = getDb();
+  const [searchJobs, crawlCounts, analysisCounts, failedCrawl, failedAnalysis] = await Promise.all([
+    listSearchJobs(db, 30),
+    countJobsByStatus(db, "crawl"),
+    countJobsByStatus(db, "analysis"),
+    listFailedJobsWithCompany(db, "crawl", 20),
+    listFailedJobsWithCompany(db, "analysis", 20),
   ]);
-  const countBy = (rows: { status: string }[] | null) => Object.fromEntries(STATUSES.map((s) => [s, (rows ?? []).filter((r) => r.status === s).length])) as Record<JobStatus, number>;
-  const crawlCounts = countBy(crawl.data);
-  const analysisCounts = countBy(analysis.data);
 
   return (
     <div>
@@ -66,14 +64,14 @@ export default async function JobsPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {(searchJobs.data ?? []).length === 0 ? (
+            {searchJobs.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={10} className="py-8 text-center text-muted-foreground">
                   検索ジョブはありません
                 </TableCell>
               </TableRow>
             ) : (
-              (searchJobs.data ?? []).map((j) => (
+              searchJobs.map((j) => (
                 <TableRow key={j.id}>
                   <TableCell>
                     <Link href={`/search/${j.id}`} className="hover:underline">
@@ -102,8 +100,8 @@ export default async function JobsPage() {
       </div>
 
       {[
-        { title: "失敗したクロール", rows: failedCrawl.data ?? [] },
-        { title: "失敗したAI分析", rows: failedAnalysis.data ?? [] },
+        { title: "失敗したクロール", rows: failedCrawl },
+        { title: "失敗したAI分析", rows: failedAnalysis },
       ].map((sec) =>
         sec.rows.length > 0 ? (
           <div key={sec.title}>
@@ -123,7 +121,7 @@ export default async function JobsPage() {
                     <TableRow key={r.id}>
                       <TableCell>
                         <Link href={`/companies/${r.company_id}`} className="hover:underline">
-                          {r.companies?.company_name ?? r.company_id}
+                          {r.company_name ?? r.company_id}
                         </Link>
                       </TableCell>
                       <TableCell className="max-w-lg truncate text-red-700" title={r.error ?? undefined}>

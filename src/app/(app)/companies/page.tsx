@@ -7,7 +7,7 @@ import { CompanyTable } from "@/components/companies/company-table";
 import { Pagination } from "@/components/companies/pagination";
 import { filtersToSearchParams, parseCompanyFilters } from "@/lib/companies/filters";
 import { listCompanies } from "@/lib/companies/queries";
-import { getRequestDb } from "@/lib/supabase/request-db";
+import { getDb } from "@/db";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "企業一覧" };
@@ -15,7 +15,7 @@ export const metadata = { title: "企業一覧" };
 export default async function CompaniesPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const params = await searchParams;
   const filters = parseCompanyFilters(params);
-  const db = await getRequestDb();
+  const db = getDb();
   const result = await listCompanies(db, filters);
   const exportQs = filtersToSearchParams({ ...filters, page: 1 }).toString();
 

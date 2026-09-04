@@ -5,19 +5,17 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { JobStatusBadge, RankBadge } from "@/components/companies/badges";
 import { getDashboardStats } from "@/lib/companies/queries";
-import { getRequestDb } from "@/lib/supabase/request-db";
+import { getDb } from "@/db";
+import { listTopCompanies } from "@/db/repositories/companies";
+import { listSearchJobs } from "@/db/repositories/jobs";
 import { formatDate } from "@/lib/utils/format";
 import { industryLabel } from "@/lib/companies/constants";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const db = await getRequestDb();
-  const [stats, recentJobs, topCompanies] = await Promise.all([
-    getDashboardStats(db),
-    db.from("search_jobs").select("id, name, status, requested_count, registered_count, new_count, created_at").order("created_at", { ascending: false }).limit(5),
-    db.from("company_overview").select("id, company_name, prefecture, industry, sales_priority_score, sales_priority_rank, sales_contact_allowed, analyzed_at").not("sales_priority_score", "is", null).order("sales_priority_score", { ascending: false }).limit(8),
-  ]);
+  const db = getDb();
+  const [stats, recentJobs, topCompanies] = await Promise.all([getDashboardStats(db), listSearchJobs(db, 5), listTopCompanies(db, 8)]);
 
   return (
     <div>
@@ -67,14 +65,14 @@ export default async function DashboardPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(topCompanies.data ?? []).length === 0 ? (
+                {topCompanies.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
                       まだ分析済みの企業がありません
                     </TableCell>
                   </TableRow>
                 ) : (
-                  (topCompanies.data ?? []).map((c) => (
+                  topCompanies.map((c) => (
                     <TableRow key={c.id}>
                       <TableCell>
                         <Link href={`/companies/${c.id}`} className="font-medium hover:underline">
@@ -114,14 +112,14 @@ export default async function DashboardPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(recentJobs.data ?? []).length === 0 ? (
+                {recentJobs.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
                       まだ検索を実行していません
                     </TableCell>
                   </TableRow>
                 ) : (
-                  (recentJobs.data ?? []).map((j) => (
+                  recentJobs.map((j) => (
                     <TableRow key={j.id}>
                       <TableCell>
                         <Link href={`/search/${j.id}`} className="hover:underline">

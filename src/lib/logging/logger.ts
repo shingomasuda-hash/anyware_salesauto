@@ -1,5 +1,6 @@
-import type { AdminClient } from "@/lib/supabase/admin";
-import type { Json } from "@/lib/db/types";
+import type { Db } from "@/db";
+import { insertSystemLog } from "@/db/repositories/logs";
+import type { Json } from "@/db/types";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type LogCategory = "search" | "company" | "crawl" | "analysis" | "api" | "job" | "auth" | "system";
@@ -20,7 +21,7 @@ export interface LogEntry {
  */
 export class Logger {
   constructor(
-    private readonly db: AdminClient | null,
+    private readonly db: Db | null,
     private readonly base: Partial<Pick<LogEntry, "category" | "companyId" | "jobId" | "jobType">> = {},
   ) {}
 
@@ -54,7 +55,7 @@ export class Logger {
 
     if (!this.db || merged.level === "debug") return;
     try {
-      await this.db.from("system_logs").insert({
+      await insertSystemLog(this.db, {
         level: merged.level,
         category: merged.category,
         message: merged.message.slice(0, 2000),
