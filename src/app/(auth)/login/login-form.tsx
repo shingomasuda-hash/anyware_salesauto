@@ -23,7 +23,7 @@ export function LoginForm({ next }: { next: string }) {
       <Button type="submit" className="w-full" disabled={pending}>
         {pending ? "ログイン中…" : "ログイン"}
       </Button>
-      <p className="text-xs text-muted-foreground">ユーザーは Neon Console の Auth（Users）から作成してください。</p>
+      <p className="text-xs text-muted-foreground">ユーザーは管理者が <code>npm run auth:create-user</code> で作成します（Neon Console の Create user ではパスワードを設定できません）。</p>
     </form>
   );
 }

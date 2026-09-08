@@ -15,10 +15,23 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   const next = String(formData.get("next") ?? "/");
   if (!email || !password) return { error: "メールアドレスとパスワードを入力してください", email };
 
-  const { error } = await getAuth().signIn.email({ email, password });
-  if (error) {
-    const msg = error.message ?? "";
-    return { error: /invalid|credential|password|not found/i.test(msg) ? "メールアドレスまたはパスワードが正しくありません" : msg || "ログインに失敗しました", email };
+  let result: { error?: { message?: string; status?: number; code?: string } | null };
+  try {
+    result = await getAuth().signIn.email({ email, password });
+  } catch (err) {
+    console.error("[auth] signIn.email threw", err);
+    return { error: `Neon Auth への接続に失敗しました: ${err instanceof Error ? err.message : String(err)}`, email };
+  }
+  if (result.error) {
+    const msg = result.error.message ?? "";
+    console.error("[auth] signIn.email failed", { status: result.error.status, code: result.error.code, message: msg });
+    if (/invalid (email|password|credential)|invalid_email_or_password|user not found|incorrect/i.test(msg) || result.error.code === "INVALID_EMAIL_OR_PASSWORD") {
+      return { error: "メールアドレスまたはパスワードが正しくありません", email };
+    }
+    if (/verif/i.test(msg) || result.error.code === "EMAIL_NOT_VERIFIED") {
+      return { error: "メールアドレスが未確認です。Neon Console → Auth → Configuration でメール確認の必須設定をオフにするか、確認メールの手続きを行ってください。", email };
+    }
+    return { error: `ログインに失敗しました（${result.error.status ?? "-"} ${result.error.code ?? ""}）: ${msg || "不明なエラー"}`, email };
   }
   redirect(next.startsWith("/") && !next.startsWith("//") ? next : "/");
 }
