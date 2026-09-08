@@ -1,4 +1,4 @@
-import { neon, neonConfig } from "@neondatabase/serverless";
+import { neon } from "@neondatabase/serverless";
 import { drizzle as drizzleNeonHttp } from "drizzle-orm/neon-http";
 import { drizzle as drizzleNodePg } from "drizzle-orm/node-postgres";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
@@ -35,7 +35,6 @@ export function getDb(): Db {
   if (cached) return cached;
   const url = String(requireEnv("DATABASE_URL"));
   if (isNeonDatabaseUrl(url)) {
-    neonConfig.fetchConnectionCache = true;
     const client = neon(url);
     cached = drizzleNeonHttp(client, { schema }) as unknown as Db;
   } else {

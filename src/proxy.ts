@@ -7,7 +7,7 @@ import { getAuth } from "@/lib/auth/server";
  * - AUTH_MODE=disabled（development のみ）では素通し
  * - Neon Auth 未設定時は /login で設定不備を案内する
  */
-const PUBLIC_PREFIXES = ["/login", "/api/", "/auth/"];
+const PUBLIC_PREFIXES = ["/login", "/api/", "/auth/"]; // /api/health も含む（診断用・秘密情報なし）
 
 export async function proxy(request: NextRequest) {
   const authDisabled = process.env.AUTH_MODE === "disabled" && process.env.NODE_ENV !== "production";
