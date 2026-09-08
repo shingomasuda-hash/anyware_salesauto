@@ -187,7 +187,11 @@ npm run dev                   # http://localhost:3000
 1. Neon Console 左メニューの **Auth** を開き **Enable Neon Auth** を押します
 2. 表示される **Base URL**（`https://ep-xxxx.neonauth.….neon.tech/neondb/auth` の形式）をコピーし、`.env.local` の `NEON_AUTH_BASE_URL=` に貼り付けます
 3. **Email / Password** サインインが有効になっていることを確認します（既定で有効）
-4. Auth 画面の **Users** タブ → **Add user** で、社内利用者のメールアドレスとパスワードを登録します（このシステムにはサインアップ画面はありません）
+4. ログイン用ユーザーは、プロジェクトフォルダで次のコマンドを実行して作成します（Console の「Create user」はパスワードを設定できないため）
+   ```bash
+   npm run auth:create-user -- --email you@any-ware.jp --password "パスワード" --name "氏名"
+   ```
+   このシステムにはサインアップ画面がなく、`/api/auth` 経由のサインアップも遮断しています。利用者を増やすときも同じコマンドで作成してください
 5. `NEON_AUTH_COOKIE_SECRET` には 32 文字以上のランダム文字列を設定します。ターミナルで次を実行した結果を貼り付けてください
    ```bash
    openssl rand -base64 32
