@@ -8,6 +8,7 @@ import { extractDomain, normalizeUrl } from "@/lib/companies/normalize";
 import { decideOfficialSite, isNonOfficialDomain, type OfficialSiteCandidate, type OfficialSiteScore } from "@/lib/companies/official-site";
 import { crawlSite } from "@/lib/crawler/crawl-site";
 import { extractHtml } from "@/lib/crawler/extract";
+import { selectCompanyEmail } from "@/lib/crawler/contacts";
 import { decideSalesContactAllowed } from "@/lib/crawler/sales-restriction";
 import type { CrawlSummary } from "@/lib/crawler/types";
 import { fetchHtml } from "@/lib/integrations/http/fetch";
@@ -209,9 +210,9 @@ async function resolveOfficialSite(db: Db, company: CompanyRow, logger: Logger):
 
 function buildCompanyUpdate(company: CompanyRow, site: ResolvedSite, summary: CrawlSummary, now: string): Partial<CompanyInsert> {
   const domain = site.domain ?? extractDomain(site.url);
-  // 同一ドメインのメールを優先（サイト内に記載された公開アドレスのみ。推測生成はしない）
-  const sameDomain = summary.emails.filter((e) => domain && e.endsWith(`@${domain}`));
-  const email = sameDomain[0] ?? summary.emails[0] ?? null;
+  // サイト内に記載された公開アドレスのみ採用（推測生成はしない）。
+  // 制作会社など無関係ドメインのメールは企業の連絡先として保存しない。
+  const email = selectCompanyEmail(summary.emails, domain);
   const restriction = summary.salesRestrictions[0] ?? null;
   const allowed = decideSalesContactAllowed(summary.salesRestrictions);
 

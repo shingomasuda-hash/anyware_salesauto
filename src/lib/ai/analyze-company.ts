@@ -8,6 +8,7 @@ import { insertAiUsageLog } from "@/db/repositories/logs";
 import { ensureSuppression } from "@/db/repositories/suppression";
 import { Logger, serializeError } from "@/lib/logging/logger";
 import { computeSalesPriorityScore, rankFromScore } from "@/lib/scoring/priority";
+import { employeeRangeFromCount } from "@/lib/companies/constants";
 import { getAiProvider } from "./index";
 import { buildAnalysisContext } from "./context";
 import type { CompanyAnalysisOutput } from "./schemas";
@@ -69,7 +70,7 @@ export async function analyzeCompany(db: Db, companyId: string, logger: Logger):
   const rank = rankFromScore(salesPriority);
 
   // 営業拒否: ルール検出 or AI 検出のいずれかで false
-  const restriction = resolveSalesRestriction(company, out);
+  const restriction = resolveSalesRestriction(company, out, pageRows);
 
   const analysis = await insertAnalysis(db, {
       company_id: companyId,
@@ -124,6 +125,21 @@ export async function analyzeCompany(db: Db, companyId: string, logger: Logger):
       evidence_text: restriction.text,
     });
   }
+
+  // 公的データ（GビズINFO）に従業員数が無く、AI がサイト記載から読み取った場合のみ採用する。
+  // 公的データ由来と区別できるよう、必ず出所を Evidence に残す。
+  const observedEmployeeCount = company.employee_count === null ? (out.employee_count_observed ?? null) : null;
+  if (observedEmployeeCount !== null) {
+    const sourcePage = pageRows.find((p) => p.page_type === "company") ?? pageRows.find((p) => p.page_type === "top") ?? pageRows[0];
+    evidenceRows.push({
+      company_id: companyId,
+      analysis_id: analysis.id,
+      category: "company",
+      source_url: sourcePage.url,
+      source_title: sourcePage.title,
+      evidence_text: `従業員数 ${observedEmployeeCount}名（公式サイト記載としてAIが読み取り。公的登録データではありません）`,
+    });
+  }
   try {
     await insertEvidence(db, evidenceRows);
   } catch (err) {
@@ -152,8 +168,9 @@ export async function analyzeCompany(db: Db, companyId: string, logger: Logger):
     sales_restriction_text: restriction.text,
     sales_restriction_source_url: restriction.sourceUrl,
   };
-  if (company.employee_count === null && out.employee_count_observed) {
-    companyUpdate.employee_count = out.employee_count_observed;
+  if (observedEmployeeCount !== null) {
+    companyUpdate.employee_count = observedEmployeeCount;
+    companyUpdate.employee_range = employeeRangeFromCount(observedEmployeeCount);
   }
   await updateCompany(db, companyId, companyUpdate);
 
@@ -174,7 +191,21 @@ export async function analyzeCompany(db: Db, companyId: string, logger: Logger):
   return { analysis, salesContactAllowed: restriction.allowed };
 }
 
-function resolveSalesRestriction(company: CompanyRow, out: CompanyAnalysisOutput): { allowed: "true" | "false" | "unknown"; text: string | null; sourceUrl: string | null } {
+/** 営業拒否表記が掲載されうるページ種別（主に問い合わせページ） */
+const RESTRICTION_BEARING_PAGE_TYPES = ["contact", "privacy"];
+
+/**
+ * 営業可否の確定。
+ * - 一度 false になった企業は再分析でも false のまま（誤って営業可能に戻さない）
+ * - AI が検出した場合も false
+ * - 表記が見つからなくても、拒否表記が載る問い合わせ系ページをクロールできていない場合は
+ *   「確認できていない」ため unknown（true と断定しない）
+ */
+export function resolveSalesRestriction(
+  company: CompanyRow,
+  out: CompanyAnalysisOutput,
+  pages: CompanyPageRow[],
+): { allowed: "true" | "false" | "unknown"; text: string | null; sourceUrl: string | null } {
   if (company.sales_contact_allowed === "false") {
     return { allowed: "false", text: company.sales_restriction_text, sourceUrl: company.sales_restriction_source_url };
   }
@@ -185,6 +216,8 @@ function resolveSalesRestriction(company: CompanyRow, out: CompanyAnalysisOutput
   if (company.sales_restriction_text) {
     return { allowed: "unknown", text: company.sales_restriction_text, sourceUrl: company.sales_restriction_source_url };
   }
+  const checked = pages.some((p) => RESTRICTION_BEARING_PAGE_TYPES.includes(p.page_type) && (p.raw_text ?? "").trim().length > 0);
+  if (!checked) return { allowed: "unknown", text: null, sourceUrl: null };
   return { allowed: "true", text: null, sourceUrl: null };
 }
 

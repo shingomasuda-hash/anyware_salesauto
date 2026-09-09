@@ -16,7 +16,10 @@
     "db:check": "drizzle-kit check",
     "seed": "tsx scripts/seed.ts",
     "jobs:run": "tsx scripts/run-jobs.ts",
-    "auth:create-user": "tsx scripts/create-user.ts"
+    "auth:create-user": "tsx scripts/create-user.ts",
+    "preflight": "tsx scripts/preflight.ts",
+    "test:real": "tsx scripts/test-real.ts",
+    "verify": "tsx scripts/verify.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.123.0",

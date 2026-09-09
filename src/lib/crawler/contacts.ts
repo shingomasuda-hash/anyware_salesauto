@@ -89,6 +89,43 @@ export function extractSocialLinks(links: ExtractedLink[]): SocialLinks {
   return result;
 }
 
+/**
+ * 中小企業が連絡先として実際に使うフリーメール。
+ * 自社ドメイン以外でも企業の窓口として妥当なため採用する。
+ */
+const FREE_MAIL_DOMAINS = [
+  "gmail.com", "yahoo.co.jp", "ybb.ne.jp", "outlook.com", "outlook.jp", "hotmail.com", "hotmail.co.jp",
+  "icloud.com", "me.com", "nifty.com", "nifty.ne.jp", "so-net.ne.jp", "ocn.ne.jp", "biglobe.ne.jp",
+  "plala.or.jp", "dion.ne.jp", "auone.jp", "ezweb.ne.jp", "docomo.ne.jp", "softbank.ne.jp", "zoho.com",
+];
+
+function emailDomain(email: string): string {
+  return email.split("@")[1]?.toLowerCase() ?? "";
+}
+
+/** 企業ドメインと同一、またはそのサブドメイン */
+function isSameOrSubDomain(mailDomain: string, siteDomain: string): boolean {
+  return mailDomain === siteDomain || mailDomain.endsWith(`.${siteDomain}`) || siteDomain.endsWith(`.${mailDomain}`);
+}
+
+/**
+ * クロールで見つかったメールから、その企業の連絡先として保存してよいものを1つ選ぶ。
+ * - 自社ドメイン（サブドメイン含む）を最優先
+ * - 次点でフリーメール（中小企業では自社ドメインを持たない場合がある）
+ * - 制作会社・取引先など無関係なドメインのメールは採用しない
+ *   （誤った宛先を企業の連絡先として保存しないため。見つからなければ null）
+ */
+export function selectCompanyEmail(emails: string[], siteDomain: string | null): string | null {
+  if (emails.length === 0) return null;
+  if (siteDomain) {
+    const own = emails.find((e) => isSameOrSubDomain(emailDomain(e), siteDomain));
+    if (own) return own;
+  }
+  const free = emails.find((e) => FREE_MAIL_DOMAINS.includes(emailDomain(e)));
+  if (free) return free;
+  return null;
+}
+
 /** 問い合わせフォームらしさの判定 */
 export function looksLikeContactForm(url: string, hasForm: boolean, text: string): boolean {
   if (!hasForm) return false;

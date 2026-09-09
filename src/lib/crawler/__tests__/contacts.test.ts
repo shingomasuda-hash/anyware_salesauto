@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractEmails, extractMailtoEmails, extractPhones, extractSocialLinks } from "../contacts";
+import { extractEmails, extractMailtoEmails, extractPhones, extractSocialLinks, selectCompanyEmail } from "../contacts";
 
 describe("extractEmails", () => {
   it("extracts plain and obfuscated emails, ignoring images and placeholders", () => {
@@ -42,5 +42,35 @@ describe("extractSocialLinks", () => {
     expect(s.x_url).toBe("https://x.com/sakura_jp");
     expect(s.youtube_url).toBe("https://www.youtube.com/@sakura");
     expect(s.linkedin_url).toBeNull();
+  });
+});
+
+describe("selectCompanyEmail（企業の連絡先として保存してよいメールの選定）", () => {
+  it("自社ドメインのメールを最優先する", () => {
+    expect(selectCompanyEmail(["contact@web-agency.jp", "info@sakura.co.jp"], "sakura.co.jp")).toBe("info@sakura.co.jp");
+  });
+
+  it("サブドメインのメールも自社として扱う", () => {
+    expect(selectCompanyEmail(["info@mail.sakura.co.jp"], "sakura.co.jp")).toBe("info@mail.sakura.co.jp");
+  });
+
+  it("自社ドメインが無ければフリーメールを採用する（中小企業で一般的）", () => {
+    expect(selectCompanyEmail(["sakura.seisakusho@gmail.com"], "sakura.co.jp")).toBe("sakura.seisakusho@gmail.com");
+    expect(selectCompanyEmail(["info@yahoo.co.jp"], "sakura.co.jp")).toBe("info@yahoo.co.jp");
+  });
+
+  it("制作会社など無関係ドメインのメールは企業の連絡先にしない", () => {
+    expect(selectCompanyEmail(["contact@web-seisaku-agency.jp"], "sakura.co.jp")).toBeNull();
+    expect(selectCompanyEmail(["support@cms-vendor.com", "sales@printing.co.jp"], "sakura.co.jp")).toBeNull();
+  });
+
+  it("メールが1件も無ければ null（推測生成しない）", () => {
+    expect(selectCompanyEmail([], "sakura.co.jp")).toBeNull();
+    expect(selectCompanyEmail([], null)).toBeNull();
+  });
+
+  it("ドメイン不明でもフリーメールなら採用、それ以外は不採用", () => {
+    expect(selectCompanyEmail(["shop@gmail.com"], null)).toBe("shop@gmail.com");
+    expect(selectCompanyEmail(["info@unknown-vendor.jp"], null)).toBeNull();
   });
 });
