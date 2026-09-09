@@ -7,12 +7,16 @@ import type { Json } from "@/db/types";
 import { getCompanyById, findCompanyByDomainExcluding, updateCompany } from "@/db/repositories/companies";
 import { countCompanyPages } from "@/db/repositories/pages";
 import { cancelSearchJob } from "@/db/repositories/jobs";
+import { cancelDiscoveryRun, getCandidate } from "@/db/repositories/discovery";
 import { deleteSuppression, ensureSuppression } from "@/db/repositories/suppression";
 import { getGbizProvider } from "@/lib/integrations/gbiz";
 import { registerCompany } from "@/lib/companies/register";
 import { extractDomain, normalizeUrl } from "@/lib/companies/normalize";
 import { Logger, serializeError } from "@/lib/logging/logger";
-import { createSearchJob, enqueueAnalysisJob, enqueueCrawlJob, retryFailedJobs } from "@/lib/jobs/enqueue";
+import { createDiscoveryRun, createSearchJob, enqueueAnalysisJob, enqueueCrawlJob, retryFailedJobs } from "@/lib/jobs/enqueue";
+import { describeDiscoveryCriteria, discoveryCriteriaSchema, toDiscoveryCriteria, toDiscoveryMode } from "@/lib/discovery/criteria";
+import { approveCandidate, correctCandidateWebsite, rejectCandidate } from "@/lib/discovery/review";
+import { resolveProviders } from "@/lib/discovery/providers";
 import { kickJobProcessing } from "@/lib/jobs/kick";
 import { processJobs } from "@/lib/jobs/runner";
 import { describeConditions, searchConditionsSchema, toSearchConditions } from "@/lib/jobs/search-conditions";
@@ -61,6 +65,93 @@ export async function createSearchJobAction(_prev: ActionState, formData: FormDa
   }
   kickJobProcessing();
   redirect(`/search/${jobId}`);
+}
+
+/**
+ * 「企業を探す」: Multi-Source Discovery のランを作成する。
+ * ここでは companies に企業を入れない。Discovery → Verification → Verified を経て昇格させる。
+ */
+export async function createDiscoveryRunAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const user = await requireUser();
+  const raw = Object.fromEntries(formData.entries());
+  const parsed = discoveryCriteriaSchema.safeParse(raw);
+  if (!parsed.success) {
+    const errors: Record<string, string> = {};
+    for (const issue of parsed.error.issues) errors[String(issue.path[0] ?? "form")] = issue.message;
+    return { ok: false, message: "入力内容を確認してください", errors };
+  }
+  const criteria = toDiscoveryCriteria(parsed.data);
+  if (criteria.employeeMin !== undefined && criteria.employeeMax !== undefined && criteria.employeeMin > criteria.employeeMax) {
+    return { ok: false, message: "従業員数の下限が上限を超えています", errors: { employeeMin: "下限 ≤ 上限 にしてください" } };
+  }
+  const mode = toDiscoveryMode(parsed.data.mode);
+  const { providers, skipped } = resolveProviders(mode);
+  if (providers.length === 0) {
+    return {
+      ok: false,
+      message: `利用できる情報源がありません（${skipped.map((s) => s.reason).join(" / ")}）。環境変数のAPIキー設定を確認してください`,
+    };
+  }
+
+  const db = getDb();
+  const logger = new Logger(db, { category: "search" });
+  let runId: string;
+  try {
+    runId = await createDiscoveryRun(db, criteria, { name: describeDiscoveryCriteria(criteria), mode, createdBy: user.id });
+    await logger.info("企業探索を作成", { runId, criteria, mode: mode ?? "auto", providers: providers.map((p) => p.name), skipped });
+  } catch (err) {
+    await logger.error("企業探索の作成に失敗", serializeError(err));
+    return { ok: false, message: err instanceof Error ? err.message : "企業探索の作成に失敗しました" };
+  }
+  kickJobProcessing();
+  redirect(`/discovery/${runId}`);
+}
+
+export async function cancelDiscoveryRunAction(runId: string): Promise<ActionState> {
+  await requireUser();
+  await cancelDiscoveryRun(getDb(), runId);
+  revalidatePath(`/discovery/${runId}`);
+  return { ok: true, message: "探索を停止しました" };
+}
+
+/** Review Queue: 候補を承認して営業候補企業へ昇格させる */
+export async function approveCandidateAction(candidateId: string, websiteUrl?: string): Promise<ActionState> {
+  const user = await requireUser();
+  const db = getDb();
+  const candidate = await getCandidate(db, candidateId);
+  if (!candidate) return { ok: false, message: "候補が見つかりません" };
+  try {
+    const result = await approveCandidate(db, candidate, { websiteUrl: normalizeUrl(websiteUrl ?? null), reviewedBy: user.id }, new Logger(db, { category: "company" }));
+    revalidatePath("/review");
+    kickJobProcessing();
+    return { ok: true, message: result.created ? `${candidate.name} を登録しました` : `${candidate.name} は既に登録済みでした` };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : "承認に失敗しました" };
+  }
+}
+
+export async function rejectCandidateAction(candidateId: string, reason: string): Promise<ActionState> {
+  const user = await requireUser();
+  const db = getDb();
+  const candidate = await getCandidate(db, candidateId);
+  if (!candidate) return { ok: false, message: "候補が見つかりません" };
+  await rejectCandidate(db, candidate, reason || "手動で却下", user.id);
+  revalidatePath("/review");
+  return { ok: true, message: `${candidate.name} を除外しました` };
+}
+
+/** Review Queue: 公式サイトを手修正して再検証する */
+export async function correctCandidateWebsiteAction(candidateId: string, websiteUrl: string): Promise<ActionState> {
+  const user = await requireUser();
+  const url = normalizeUrl(websiteUrl);
+  if (!url) return { ok: false, message: "URL を確認してください" };
+  const db = getDb();
+  const candidate = await getCandidate(db, candidateId);
+  if (!candidate) return { ok: false, message: "候補が見つかりません" };
+  await correctCandidateWebsite(db, candidate, url, user.id);
+  revalidatePath("/review");
+  kickJobProcessing();
+  return { ok: true, message: "公式サイトを更新しました。再確認を実行します" };
 }
 
 /** 手動企業追加: 企業名 + 公式URL → 登録 → クロール → 分析 */
@@ -203,7 +294,7 @@ export async function runJobsNowAction(): Promise<ActionState> {
   try {
     const stats = await processJobs({ maxRuntimeMs: 25_000 });
     revalidatePath("/jobs");
-    return { ok: true, message: `処理完了: 検索${stats.searchSteps} / クロール${stats.crawlJobs} / 分析${stats.analysisJobs}（失敗${stats.failures}）` };
+    return { ok: true, message: `処理完了: 探索${stats.discoverySteps} / 検索${stats.searchSteps} / クロール${stats.crawlJobs} / 分析${stats.analysisJobs}（失敗${stats.failures}）` };
   } catch (err) {
     return { ok: false, message: err instanceof Error ? err.message : "ジョブ処理に失敗しました" };
   }

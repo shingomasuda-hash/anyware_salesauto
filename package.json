@@ -19,7 +19,10 @@
     "auth:create-user": "tsx scripts/create-user.ts",
     "preflight": "tsx scripts/preflight.ts",
     "test:real": "tsx scripts/test-real.ts",
-    "verify": "tsx scripts/verify.ts"
+    "verify": "tsx scripts/verify.ts",
+    "discovery": "tsx scripts/discovery.ts",
+    "discovery:mock": "DATA_MODE=mock tsx scripts/discovery.ts",
+    "discovery:review": "tsx scripts/discovery-review.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.123.0",

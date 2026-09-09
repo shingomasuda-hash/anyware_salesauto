@@ -3,7 +3,7 @@
  *
  *   npm run preflight
  *
- * DATABASE_URL / Claude / GビズINFO / Google Places に最小リクエストを1回ずつ行い、
+ * DATABASE_URL / Claude / GビズINFO / Google Places / Brave Search / EDINET に最小リクエストを1回ずつ行い、
  * 「キーが有効か」「応答形式が想定どおりか」を確認する。
  * 秘密情報（キー・接続文字列）は一切表示しない。Claude はトークンを消費しない Models API を使う。
  */
@@ -17,6 +17,9 @@ import { getDb, isNeonDatabaseUrl, rawRows } from "../src/db";
 import { getAiConfig } from "../src/lib/config/ai";
 import { getDataMode, getEnv } from "../src/lib/config/env";
 import { GbizClient } from "../src/lib/integrations/gbiz/client";
+import { getDiscoveryConfig } from "../src/lib/config/discovery";
+import { getProviderAvailability } from "../src/lib/discovery/providers";
+import { PROVIDER_LABELS } from "../src/lib/discovery/criteria";
 
 type Status = "OK" | "NG" | "SKIP";
 const results: { name: string; status: Status; detail: string }[] = [];
@@ -53,14 +56,14 @@ async function checkDatabase() {
     const rows = await rawRows<{ tables: number | string; funcs: number | string }>(
       db,
       sql`select
-            (select count(*) from information_schema.tables where table_schema='public' and table_name in ('companies','company_analysis','search_jobs','crawl_jobs','analysis_jobs'))::int as tables,
+            (select count(*) from information_schema.tables where table_schema='public' and table_name in ('companies','company_analysis','search_jobs','crawl_jobs','analysis_jobs','discovery_runs','discovery_candidates','company_sources'))::int as tables,
             (select count(*) from pg_proc where pronamespace='public'::regnamespace and proname in ('claim_job','dashboard_stats','increment_search_job_counters'))::int as funcs`,
     );
     const tables = Number(rows[0]?.tables ?? 0);
     const funcs = Number(rows[0]?.funcs ?? 0);
     const driver = isNeonDatabaseUrl(env.DATABASE_URL) ? "Neon HTTP" : "node-postgres";
-    if (tables === 5 && funcs === 3) record("DATABASE_URL", "OK", `接続成功（${driver}）・マイグレーション適用済み`);
-    else record("DATABASE_URL", "NG", `接続はできたがマイグレーション未完了（テーブル ${tables}/5・関数 ${funcs}/3）。npm run db:migrate を実行してください`);
+    if (tables === 8 && funcs === 3) record("DATABASE_URL", "OK", `接続成功（${driver}）・マイグレーション適用済み`);
+    else record("DATABASE_URL", "NG", `接続はできたがマイグレーション未完了（テーブル ${tables}/8・関数 ${funcs}/3）。npm run db:migrate を実行してください`);
   } catch (err) {
     record("DATABASE_URL", "NG", `接続失敗: ${safe(err)}`);
   }
@@ -102,7 +105,7 @@ async function checkGbiz() {
 
 async function checkGooglePlaces() {
   const env = getEnv();
-  if (!env.GOOGLE_MAPS_API_KEY) return record("GOOGLE_MAPS_API_KEY", "SKIP", "未設定（任意。公式サイト探索の補助のみ）");
+  if (!env.GOOGLE_MAPS_API_KEY) return record("GOOGLE_MAPS_API_KEY", "SKIP", "未設定（任意。地域企業の発見・公式サイト探索の補助）");
   try {
     const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
       method: "POST",
@@ -125,6 +128,60 @@ async function checkGooglePlaces() {
   }
 }
 
+async function checkBraveSearch() {
+  const env = getEnv();
+  if (!env.BRAVE_SEARCH_API_KEY) return record("BRAVE_SEARCH_API_KEY", "SKIP", "未設定（任意。Web検索での企業発見に使用）");
+  try {
+    const url = new URL("https://api.search.brave.com/res/v1/web/search");
+    url.searchParams.set("q", "大阪府 金属加工 製造");
+    url.searchParams.set("count", "1");
+    url.searchParams.set("country", "JP");
+    const res = await fetch(url, {
+      headers: { Accept: "application/json", "X-Subscription-Token": env.BRAVE_SEARCH_API_KEY },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      return record("BRAVE_SEARCH_API_KEY", "NG", `HTTP ${res.status} ${text.slice(0, 150)}`);
+    }
+    const json = (await res.json()) as { web?: { results?: unknown[] } };
+    record("BRAVE_SEARCH_API_KEY", "OK", `検索成功（${json.web?.results?.length ?? 0}件）`);
+  } catch (err) {
+    record("BRAVE_SEARCH_API_KEY", "NG", safe(err));
+  }
+}
+
+async function checkEdinet() {
+  const env = getEnv();
+  if (!env.EDINET_API_KEY) return record("EDINET_API_KEY", "SKIP", "未設定（任意。上場企業の裏付けに使用）");
+  try {
+    const url = new URL("https://api.edinet-fsa.go.jp/api/v2/documents.json");
+    url.searchParams.set("date", new Date(Date.now() - 3 * 86_400_000).toISOString().slice(0, 10));
+    url.searchParams.set("type", "1");
+    url.searchParams.set("Subscription-Key", env.EDINET_API_KEY);
+    const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+    if (!res.ok) return record("EDINET_API_KEY", "NG", `HTTP ${res.status}`);
+    const json = (await res.json()) as { results?: unknown[] };
+    record("EDINET_API_KEY", "OK", `一覧取得成功（${json.results?.length ?? 0}件）`);
+  } catch (err) {
+    record("EDINET_API_KEY", "NG", safe(err));
+  }
+}
+
+/** 探索設定（DISCOVERY_MODE と Provider の利用可否）を表示する。秘密情報は出さない */
+function checkDiscoveryConfig() {
+  const cfg = getDiscoveryConfig();
+  const availability = getProviderAvailability();
+  const usable = availability.filter((a) => a.available).map((a) => PROVIDER_LABELS[a.name] ?? a.name);
+  const status: Status = usable.length > 1 ? "OK" : usable.length === 1 ? "SKIP" : "NG";
+  record("DISCOVERY_MODE", status, `${cfg.mode} / 利用できる情報源: ${usable.join(", ") || "なし"}`);
+  for (const a of availability.filter((x) => !x.available)) {
+    console.log(`   ℹ️ ${PROVIDER_LABELS[a.name] ?? a.name}: ${a.reason}`);
+  }
+  console.log(`   ℹ️ 本人確認しきい値: verified ${cfg.thresholds.verified}点 / needs_review ${cfg.thresholds.needsReview}点`);
+  console.log(`   ℹ️ 1回の探索の上限: Provider ${cfg.budget.maxProviderRequests}回 / 候補 ${cfg.budget.maxCandidates}件 / 確認 ${cfg.budget.maxVerificationRequests}回 / ${cfg.budget.maxExecutionMinutes}分`);
+}
+
 async function checkCrawlerEgress() {
   try {
     const res = await fetch("https://www.meti.go.jp/robots.txt", { signal: AbortSignal.timeout(15_000), headers: { "User-Agent": getEnv().CRAWL_USER_AGENT } });
@@ -143,6 +200,9 @@ async function main() {
   await checkAnthropic();
   await checkGbiz();
   await checkGooglePlaces();
+  await checkBraveSearch();
+  await checkEdinet();
+  checkDiscoveryConfig();
   await checkCrawlerEgress();
 
   const ng = results.filter((r) => r.status === "NG");
@@ -152,6 +212,7 @@ async function main() {
   }
   if (ng.length === 0) {
     console.log("すべて OK。実企業テストを開始できます:");
+    console.log("  npm run discovery -- --prefecture 大阪府 --industry manufacturing --count 20");
     console.log("  npm run test:real -- --count 10");
   } else {
     console.log(`${ng.length}件の問題があります。上記の NG を解消してから再実行してください。`);

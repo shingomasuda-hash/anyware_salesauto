@@ -10,6 +10,8 @@ import { OfficialSiteForm, type SiteCandidate } from "@/components/companies/off
 import { BulletList, DefinitionList, ExternalA, ScoreTile, Section } from "@/components/companies/detail-sections";
 import { employeeRangeLabel, industryLabel, SALES_RANKS } from "@/lib/companies/constants";
 import { getCompanyDetail } from "@/lib/companies/queries";
+import { listCompanySources } from "@/db/repositories/discovery";
+import { PROVIDER_LABELS } from "@/lib/discovery/criteria";
 import { getDb } from "@/db";
 import { formatDate, formatNumber } from "@/lib/utils/format";
 
@@ -31,12 +33,32 @@ const PAGE_TYPE_LABEL: Record<string, string> = {
   other: "その他",
 };
 
+const SOURCE_TYPE_LABEL: Record<string, string> = {
+  discovery: "探索で発見",
+  verification: "本人確認",
+  enrichment: "情報補完",
+  crawl: "クロール",
+};
+
+/** 情報源に表示する観測項目（公開情報のみ） */
+const OBSERVED_FIELDS: [string, string][] = [
+  ["name", "名称"],
+  ["address", "所在地"],
+  ["phone", "電話"],
+  ["website", "サイト"],
+  ["corporateNumber", "法人番号"],
+  ["industry", "業種"],
+  ["verificationScore", "確認スコア"],
+];
+
 export default async function CompanyDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ created?: string; duplicate?: string }> }) {
   const { id } = await params;
   const sp = await searchParams;
   const db = getDb();
   const detail = await getCompanyDetail(db, id);
   if (!detail) notFound();
+  // 情報源: どの Provider が何を観測したか（公的データ / 地図データ / Web検索 / 公式サイト確認）
+  const sources = await listCompanySources(db, id);
   const { company: c, analysis: a, evidence, pages, crawlJobs, analysisJobs, analysisHistory } = detail;
   const candidates = ((c.website_candidates as unknown as SiteCandidate[]) ?? []).filter((x) => x && x.url);
   const processing = crawlJobs.some((j) => ["pending", "processing", "retrying"].includes(j.status)) || analysisJobs.some((j) => ["pending", "processing", "retrying"].includes(j.status));
@@ -340,6 +362,46 @@ export default async function CompanyDetailPage({ params, searchParams }: { para
               ))}
             {crawlJobs.length === 0 && analysisJobs.length === 0 ? <li className="text-muted-foreground">履歴はありません</li> : null}
           </ul>
+        </Section>
+      </div>
+
+      <div className="mt-4">
+        <Section title={`情報源（${sources.length}）`}>
+          {sources.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              情報源の記録がありません（企業探索より前に登録された企業、または手動追加の企業です）
+            </p>
+          ) : (
+            <ul className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+              {sources.map((s) => {
+                const observed = (s.observed_data ?? {}) as Record<string, unknown>;
+                return (
+                  <li key={s.id} className="rounded-md border p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium">{PROVIDER_LABELS[s.provider] ?? s.provider}</span>
+                      <span className="text-xs text-muted-foreground tabular-nums">確度 {s.confidence}</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {SOURCE_TYPE_LABEL[s.source_type] ?? s.source_type} ／ {formatDate(s.observed_at, true)}
+                    </div>
+                    {s.source_url ? (
+                      <ExternalA href={s.source_url}>
+                        <span className="block truncate text-xs">{s.source_url}</span>
+                      </ExternalA>
+                    ) : null}
+                    <dl className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                      {OBSERVED_FIELDS.filter(([key]) => observed[key]).map(([key, label]) => (
+                        <div key={key} className="flex gap-2">
+                          <dt className="shrink-0">{label}</dt>
+                          <dd className="truncate">{String(observed[key])}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </Section>
       </div>
     </div>

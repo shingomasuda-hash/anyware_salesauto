@@ -42,6 +42,13 @@ export default async function DashboardPage() {
         <StatCard label="未分析企業" value={stats.unanalyzed} href="/companies?unanalyzed=1" tone={stats.unanalyzed > 0 ? "warning" : "default"} />
         <StatCard label="営業拒否企業" value={stats.sales_restricted} hint="自動送信対象から除外" tone={stats.sales_restricted > 0 ? "danger" : "default"} />
         <StatCard label="公式サイト未確認" value={stats.website_unverified} href="/companies?needsReview=1" tone={stats.website_unverified > 0 ? "warning" : "default"} />
+        <StatCard
+          label="確認待ち候補"
+          value={stats.needs_review_candidates}
+          href="/review"
+          hint="承認するまで企業登録されません"
+          tone={stats.needs_review_candidates > 0 ? "warning" : "default"}
+        />
         <StatCard label="処理待ちジョブ" value={stats.pending_jobs} href="/jobs" />
       </div>
 

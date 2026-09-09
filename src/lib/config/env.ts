@@ -29,6 +29,16 @@ const envSchema = z.object({
 
   GBIZ_API_KEY: optionalString,
   GOOGLE_MAPS_API_KEY: optionalString,
+  BRAVE_SEARCH_API_KEY: optionalString,
+  EDINET_API_KEY: optionalString,
+
+  // --- Multi-Source Discovery ---
+  DISCOVERY_MODE: z.enum(["gbiz", "places", "search", "hybrid"]).optional(),
+  DISCOVERY_MAX_PROVIDER_REQUESTS: z.coerce.number().int().positive().default(60),
+  DISCOVERY_MAX_CANDIDATES: z.coerce.number().int().positive().default(600),
+  DISCOVERY_MAX_VERIFICATION_REQUESTS: z.coerce.number().int().positive().default(300),
+  DISCOVERY_MAX_AI_CALLS: z.coerce.number().int().positive().default(200),
+  DISCOVERY_MAX_EXECUTION_MINUTES: z.coerce.number().int().positive().default(60),
 
   JOB_SECRET: optionalString,
   CRON_SECRET: optionalString,

@@ -337,6 +337,112 @@ export const aiUsageLogs = pgTable(
 );
 
 // =============================================================
+// Multi-Source Company Discovery
+// =============================================================
+
+/** 1 回の企業探索の実行単位。Provider 統計・予算・進捗を保持する */
+export const discoveryRuns = pgTable(
+  "discovery_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name"),
+    criteria: jsonb("criteria").$type<Json>().notNull(),
+    mode: text("mode").$type<DiscoveryMode>().notNull().default("hybrid"),
+    status: text("status").$type<DiscoveryRunStatus>().notNull().default("pending"),
+    phase: text("phase").$type<DiscoveryPhase>().notNull().default("discovering"),
+    requested_count: integer("requested_count").notNull().default(100),
+    discovered_count: integer("discovered_count").notNull().default(0),
+    verified_count: integer("verified_count").notNull().default(0),
+    needs_review_count: integer("needs_review_count").notNull().default(0),
+    duplicate_count: integer("duplicate_count").notNull().default(0),
+    rejected_count: integer("rejected_count").notNull().default(0),
+    promoted_count: integer("promoted_count").notNull().default(0),
+    provider_stats: jsonObject("provider_stats"),
+    budget: jsonObject("budget"),
+    cursor: jsonObject("cursor"),
+    attempts: integer("attempts").notNull().default(0),
+    max_attempts: integer("max_attempts").notNull().default(3),
+    error: text("error"),
+    created_by: text("created_by"),
+    locked_at: ts("locked_at"),
+    started_at: ts("started_at"),
+    completed_at: ts("completed_at"),
+    created_at: tsNow("created_at"),
+    updated_at: tsNow("updated_at"),
+  },
+  (t) => [
+    index("discovery_runs_status_idx").on(t.status, t.created_at),
+    check("discovery_runs_status_check", sql`${t.status} in ('pending','running','completed','partially_completed','failed','cancelled')`),
+    check("discovery_runs_mode_check", sql`${t.mode} in ('gbiz','places','search','hybrid')`),
+  ],
+);
+
+/** 探索で発見した企業候補。検証を通過するまで companies には入れない */
+export const discoveryCandidates = pgTable(
+  "discovery_candidates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    run_id: uuid("run_id").references(() => discoveryRuns.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    normalized_name: text("normalized_name").notNull(),
+    address: text("address"),
+    address_normalized: text("address_normalized"),
+    prefecture: text("prefecture"),
+    city: text("city"),
+    phone: text("phone"),
+    website: text("website"),
+    domain: text("domain"),
+    corporate_number: text("corporate_number"),
+    industry: text("industry"),
+    primary_source: text("primary_source").$type<DiscoveryProviderName>().notNull(),
+    sources: text("sources").array().notNull().default(sql`'{}'::text[]`),
+    source_confidence: integer("source_confidence").notNull().default(0),
+    verification_score: integer("verification_score"),
+    verification_signals: jsonArray("verification_signals"),
+    official_site_confidence: integer("official_site_confidence"),
+    recruiting_signal: text("recruiting_signal").$type<RecruitingSignal>().notNull().default("unknown"),
+    status: text("status").$type<DiscoveryCandidateStatus>().notNull().default("discovered"),
+    reject_reason: text("reject_reason"),
+    company_id: uuid("company_id").references(() => companies.id, { onDelete: "set null" }),
+    raw_data: jsonObject("raw_data"),
+    reviewed_by: text("reviewed_by"),
+    reviewed_at: ts("reviewed_at"),
+    created_at: tsNow("created_at"),
+    updated_at: tsNow("updated_at"),
+  },
+  (t) => [
+    index("discovery_candidates_run_idx").on(t.run_id, t.status),
+    index("discovery_candidates_status_idx").on(t.status, t.created_at),
+    index("discovery_candidates_corp_idx").on(t.corporate_number),
+    index("discovery_candidates_domain_idx").on(t.domain),
+    index("discovery_candidates_name_idx").on(t.normalized_name),
+    check("discovery_candidates_status_check", sql`${t.status} in ('discovered','verifying','verified','needs_review','duplicate','rejected','failed')`),
+    check("discovery_candidates_recruiting_check", sql`${t.recruiting_signal} in ('yes','no','unknown')`),
+  ],
+);
+
+/** 企業情報の出所。同じ企業について複数 Provider の観測をすべて残す */
+export const companySources = pgTable(
+  "company_sources",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    company_id: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+    provider: text("provider").$type<DiscoveryProviderName>().notNull(),
+    external_id: text("external_id"),
+    source_url: text("source_url"),
+    source_type: text("source_type").$type<CompanySourceType>().notNull().default("discovery"),
+    confidence: integer("confidence").notNull().default(0),
+    observed_data: jsonObject("observed_data"),
+    observed_at: tsNow("observed_at"),
+    created_at: tsNow("created_at"),
+  },
+  (t) => [
+    index("company_sources_company_idx").on(t.company_id),
+    uniqueIndex("company_sources_company_provider_key").on(t.company_id, t.provider, t.external_id),
+  ],
+);
+
+// =============================================================
 // 将来用テーブル（Phase 4 以降）。空でもシステムは動作する。
 // =============================================================
 export const services = pgTable("services", {
@@ -550,3 +656,10 @@ export type YesNoUnknown = "yes" | "no" | "unknown";
 export type RecruitingStatus = "active" | "inactive" | "unknown";
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type SuppressionReason = "sales_restriction_detected" | "unsubscribed" | "do_not_contact" | "no_reply_needed" | "bounced" | "manual";
+export type DiscoveryProviderName = "gbiz" | "google_places" | "web_search" | "edinet" | "official_web";
+export type DiscoveryMode = "gbiz" | "places" | "search" | "hybrid";
+export type DiscoveryRunStatus = "pending" | "running" | "completed" | "partially_completed" | "failed" | "cancelled";
+export type DiscoveryPhase = "discovering" | "verifying" | "promoting" | "done";
+export type DiscoveryCandidateStatus = "discovered" | "verifying" | "verified" | "needs_review" | "duplicate" | "rejected" | "failed";
+export type RecruitingSignal = "yes" | "no" | "unknown";
+export type CompanySourceType = "discovery" | "verification" | "enrichment" | "crawl";

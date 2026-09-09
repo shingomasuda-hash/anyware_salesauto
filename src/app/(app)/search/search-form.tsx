@@ -1,13 +1,16 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/select";
 import { COMPANY_SIZE_PRESETS, CORPORATE_TYPES, INDUSTRIES, PREFECTURE_NAMES } from "@/lib/companies/constants";
-import { createSearchJobAction, type ActionState } from "@/app/(app)/actions";
+import { DISCOVERY_MODE_OPTIONS } from "@/lib/discovery/criteria";
+import { allSubcategoryOptions } from "@/lib/discovery/taxonomy";
+import { createDiscoveryRunAction, type ActionState } from "@/app/(app)/actions";
+import type { ProviderAvailability } from "@/lib/discovery/providers";
 
 function Field({ label, htmlFor, error, hint, children }: { label: string; htmlFor: string; error?: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -20,9 +23,21 @@ function Field({ label, htmlFor, error, hint, children }: { label: string; htmlF
   );
 }
 
-export function SearchForm() {
-  const [state, action, pending] = useActionState<ActionState, FormData>(createSearchJobAction, null);
+const PROVIDER_LABELS: Record<string, string> = {
+  gbiz: "GビズINFO",
+  google_places: "Google Places",
+  web_search: "Web検索",
+  edinet: "EDINET",
+  official_web: "公式サイト確認",
+};
+
+export function SearchForm({ availability }: { availability: ProviderAvailability[] }) {
+  const [state, action, pending] = useActionState<ActionState, FormData>(createDiscoveryRunAction, null);
+  const [industry, setIndustry] = useState("manufacturing");
   const errors = state?.errors ?? {};
+  const subcategories = allSubcategoryOptions(industry);
+  const unavailable = availability.filter((a) => !a.available);
+
   return (
     <form action={action} className="space-y-5 rounded-lg border p-6">
       {state && !state.ok ? (
@@ -45,7 +60,7 @@ export function SearchForm() {
           <Input id="city" name="city" placeholder="任意" />
         </Field>
         <Field label="業種" htmlFor="industry" error={errors.industry}>
-          <NativeSelect id="industry" name="industry" defaultValue="manufacturing">
+          <NativeSelect id="industry" name="industry" value={industry} onChange={(e) => setIndustry(e.target.value)}>
             <option value="">指定なし</option>
             {INDUSTRIES.map((i) => (
               <option key={i.key} value={i.key}>
@@ -54,7 +69,31 @@ export function SearchForm() {
             ))}
           </NativeSelect>
         </Field>
-        <Field label="キーワード" htmlFor="keyword" error={errors.keyword} hint="法人名に含まれる語（GビズINFO の名称検索）">
+        <Field
+          label="業種詳細"
+          htmlFor="industrySubcategory"
+          error={errors.industrySubcategory}
+          hint="未指定なら業種を自動で細分化して探索します（例: 金属加工・精密加工…）"
+        >
+          <NativeSelect id="industrySubcategory" name="industrySubcategory" defaultValue="" disabled={subcategories.length === 0}>
+            <option value="">すべて（自動展開）</option>
+            {subcategories.map((s) => (
+              <option key={s.key} value={s.key}>
+                {s.label}
+              </option>
+            ))}
+          </NativeSelect>
+        </Field>
+        <Field label="探索方法" htmlFor="mode" error={errors.mode} hint="複数の情報源を突き合わせるほど本人確認の精度が上がります">
+          <NativeSelect id="mode" name="mode" defaultValue="auto">
+            {DISCOVERY_MODE_OPTIONS.map((m) => (
+              <option key={m.key} value={m.key}>
+                {m.label}
+              </option>
+            ))}
+          </NativeSelect>
+        </Field>
+        <Field label="キーワード" htmlFor="keyword" error={errors.keyword} hint="社名や事業内容に含まれる語">
           <Input id="keyword" name="keyword" placeholder="任意" />
         </Field>
         <Field label="企業規模" htmlFor="companySize" error={errors.companySize}>
@@ -84,21 +123,41 @@ export function SearchForm() {
             ))}
           </NativeSelect>
         </Field>
-        <Field label="検索件数（登録する企業数）" htmlFor="requestedCount" error={errors.requestedCount} hint="1〜500。既存企業も含めた件数です">
-          <Input id="requestedCount" name="requestedCount" type="number" min={1} max={500} defaultValue={100} />
+        <Field label="探索件数（営業候補にする企業数）" htmlFor="requestedCount" error={errors.requestedCount} hint="1〜500。本人確認を通った企業だけが登録されます">
+          <Input id="requestedCount" name="requestedCount" type="number" min={1} max={500} defaultValue={50} />
         </Field>
       </div>
       <div className="flex flex-wrap gap-6 text-sm">
         <label className="inline-flex items-center gap-2">
-          <input type="checkbox" name="requireWebsite" className="size-3.5 accent-primary" /> 公式HPがある企業のみ
+          <input type="checkbox" name="requireWebsite" defaultChecked className="size-3.5 accent-primary" /> 公式HPを確認できた企業のみ
         </label>
         <label className="inline-flex items-center gap-2">
-          <input type="checkbox" name="requireRecruiting" className="size-3.5 accent-primary" /> 採用活動あり（分析後に一覧で絞り込み）
+          <input type="checkbox" name="requireRecruiting" className="size-3.5 accent-primary" /> 採用活動あり
         </label>
       </div>
+
+      <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+        <p className="font-medium text-foreground">利用できる情報源</p>
+        <p className="mt-1">
+          {availability
+            .filter((a) => a.available)
+            .map((a) => PROVIDER_LABELS[a.name] ?? a.name)
+            .join(" / ") || "なし"}
+        </p>
+        {unavailable.length > 0 ? (
+          <ul className="mt-2 space-y-0.5">
+            {unavailable.map((a) => (
+              <li key={a.name}>
+                ・{PROVIDER_LABELS[a.name] ?? a.name}: {a.reason}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+
       <div className="flex items-center justify-end gap-3">
         <Button type="submit" disabled={pending}>
-          {pending ? "開始中…" : "検索を開始"}
+          {pending ? "開始中…" : "探索を開始"}
         </Button>
       </div>
     </form>

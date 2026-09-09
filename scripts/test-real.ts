@@ -53,7 +53,7 @@ async function main() {
     const line = `pass ${pass}: 登録 ${p?.job.registered_count ?? 0}/${count} · 新規 ${p?.job.new_count ?? 0} · 重複 ${p?.job.duplicate_count ?? 0} · クロール ${p?.crawl.completed ?? 0}/${p?.crawl.total ?? 0} · 分析 ${p?.analysis.completed ?? 0}/${p?.analysis.total ?? 0} · 失敗 ${(p?.crawl.failed ?? 0) + (p?.analysis.failed ?? 0)}`;
     console.log(line);
     if (p?.isFinished) break;
-    if (stats.stoppedReason === "empty" && stats.searchSteps + stats.crawlJobs + stats.analysisJobs === 0) break;
+    if (stats.stoppedReason === "empty" && stats.discoverySteps + stats.searchSteps + stats.crawlJobs + stats.analysisJobs === 0) break;
   }
 
   const elapsed = Math.round((Date.now() - started) / 1000);

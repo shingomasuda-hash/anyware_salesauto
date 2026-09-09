@@ -22,7 +22,7 @@ async function main() {
   console.log(`[seed] search job created: ${jobId}`);
   for (let i = 0; i < 30; i++) {
     const stats = await processJobs({ db, maxRuntimeMs: 55_000 });
-    console.log(`[seed] pass ${i + 1}: search=${stats.searchSteps} crawl=${stats.crawlJobs} analysis=${stats.analysisJobs} failures=${stats.failures}`);
+    console.log(`[seed] pass ${i + 1}: discovery=${stats.discoverySteps} search=${stats.searchSteps} crawl=${stats.crawlJobs} analysis=${stats.analysisJobs} failures=${stats.failures}`);
     if (stats.stoppedReason === "empty") break;
   }
   console.log("[seed] done");

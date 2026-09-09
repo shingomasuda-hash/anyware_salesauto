@@ -16,8 +16,8 @@ async function main() {
   for (;;) {
     try {
       const stats = await processJobs({ maxRuntimeMs: 55_000 });
-      if (stats.searchSteps + stats.crawlJobs + stats.analysisJobs > 0) {
-        console.log(`[jobs] search=${stats.searchSteps} crawl=${stats.crawlJobs} analysis=${stats.analysisJobs} failures=${stats.failures} (${stats.durationMs}ms)`);
+      if (stats.discoverySteps + stats.searchSteps + stats.crawlJobs + stats.analysisJobs > 0) {
+        console.log(`[jobs] discovery=${stats.discoverySteps} search=${stats.searchSteps} crawl=${stats.crawlJobs} analysis=${stats.analysisJobs} failures=${stats.failures} (${stats.durationMs}ms)`);
       }
     } catch (err) {
       console.error("[jobs] error", err);

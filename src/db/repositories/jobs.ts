@@ -5,7 +5,7 @@ import { analysisJobs, companies, crawlJobs, searchJobItems, searchJobs } from "
 import type { AnalysisJobRow, CrawlJobRow, JobStatus, SearchJobItemRow, SearchJobRow } from "../types";
 
 export type JobKind = "crawl" | "analysis";
-export type JobTable = "search_jobs" | "crawl_jobs" | "analysis_jobs";
+export type JobTable = "search_jobs" | "crawl_jobs" | "analysis_jobs" | "discovery_runs";
 
 export const ACTIVE_JOB_STATUSES: JobStatus[] = ["pending", "retrying", "processing"];
 

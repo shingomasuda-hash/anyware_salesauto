@@ -1,14 +1,17 @@
 import { getEnv } from "@/lib/config/env";
 import { getDb, type Db } from "@/db";
-import type { AnalysisJobRow, CrawlJobRow, SearchJobRow } from "@/db/types";
+import type { AnalysisJobRow, CrawlJobRow, DiscoveryRunRow, SearchJobRow } from "@/db/types";
 import { claimJob, updateJob, updateSearchJob } from "@/db/repositories/jobs";
+import { updateDiscoveryRun } from "@/db/repositories/discovery";
 import { updateCompany } from "@/db/repositories/companies";
 import { Logger, serializeError } from "@/lib/logging/logger";
 import { processAnalysisJob } from "./analysis-job";
 import { processCrawlJob } from "./crawl-job";
+import { processDiscoveryRunStep } from "./discovery-job";
 import { processSearchJobStep } from "./search-job";
 
 export interface RunnerStats {
+  discoverySteps: number;
   searchSteps: number;
   crawlJobs: number;
   analysisJobs: number;
@@ -19,7 +22,7 @@ export interface RunnerStats {
 
 /**
  * ジョブランナー。maxRuntimeMs の範囲で pending ジョブを順番に処理する。
- * 優先順: 検索ステップ → 分析（クロール済みをすぐ結果に反映） → クロール
+ * 優先順: 探索ステップ → 検索ステップ → 分析（クロール済みをすぐ結果に反映） → クロール
  * 複数の呼び出しが同時に走っても claim_job (FOR UPDATE SKIP LOCKED) により二重処理されない。
  */
 export async function processJobs(options: { maxRuntimeMs?: number; db?: Db } = {}): Promise<RunnerStats> {
@@ -28,10 +31,16 @@ export async function processJobs(options: { maxRuntimeMs?: number; db?: Db } = 
   const maxRuntime = options.maxRuntimeMs ?? env.JOB_MAX_RUNTIME_MS;
   const started = Date.now();
   const deadline = started + maxRuntime;
-  const stats: RunnerStats = { searchSteps: 0, crawlJobs: 0, analysisJobs: 0, failures: 0, durationMs: 0, stoppedReason: "empty" };
+  const stats: RunnerStats = { discoverySteps: 0, searchSteps: 0, crawlJobs: 0, analysisJobs: 0, failures: 0, durationMs: 0, stoppedReason: "empty" };
   const rootLogger = new Logger(db, { category: "job" });
 
   while (Date.now() < deadline) {
+    const discovery = await claimJob<DiscoveryRunRow>(db, "discovery_runs");
+    if (discovery) {
+      stats.discoverySteps++;
+      await runDiscoveryStep(db, discovery, rootLogger, deadline, stats);
+      continue;
+    }
     const search = await claimJob<SearchJobRow>(db, "search_jobs");
     if (search) {
       stats.searchSteps++;
@@ -55,6 +64,28 @@ export async function processJobs(options: { maxRuntimeMs?: number; db?: Db } = 
   stats.stoppedReason = Date.now() >= deadline ? "deadline" : "empty";
   stats.durationMs = Date.now() - started;
   return stats;
+}
+
+async function runDiscoveryStep(db: Db, run: DiscoveryRunRow, root: Logger, deadline: number, stats: RunnerStats) {
+  const logger = root.child({ category: "search", jobId: run.id });
+  try {
+    const outcome = await processDiscoveryRunStep(db, run, logger, deadline);
+    if (outcome === "continue") {
+      // 継続: attempts は消費しない（時間切れでの再開は失敗ではない）
+      await updateDiscoveryRun(db, run.id, { status: "pending", locked_at: null, attempts: Math.max(0, run.attempts - 1) });
+    }
+    // completed / failed は processDiscoveryRunStep 側で status を確定させている
+  } catch (err) {
+    stats.failures++;
+    const failed = run.attempts >= run.max_attempts;
+    await updateDiscoveryRun(db, run.id, {
+      status: failed ? "failed" : "pending",
+      locked_at: null,
+      error: errMessage(err),
+      completed_at: failed ? new Date().toISOString() : null,
+    });
+    await logger.error(failed ? "企業探索が失敗（上限到達）" : "企業探索でエラー（再試行）", serializeError(err));
+  }
 }
 
 async function runSearchStep(db: Db, job: SearchJobRow, root: Logger, deadline: number, stats: RunnerStats) {

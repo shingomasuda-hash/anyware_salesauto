@@ -3,7 +3,8 @@
 株式会社AnyWare 向けの「汎用営業AI基盤」。
 条件を指定して営業対象企業を自動収集し、公式Webサイトを解析、Claude で企業のデジタル・採用・営業上の状態を客観分析してスコアリングし、営業リストとして蓄積します。
 
-本リポジトリは **Phase 1〜3（企業収集 / HP解析・AI分析 / 管理画面）** を実装したものです。
+本リポジトリは **Phase 1〜3（企業収集 / HP解析・AI分析 / 管理画面）** と、
+**複数情報源からの企業探索（Multi-Source Discovery）** を実装したものです。
 Phase 4 以降（サービス登録・AIマッチング・営業メール生成・Gmail送信・返信管理・追客）は未実装ですが、DB 設計は先行して用意しています。
 
 ---
@@ -17,11 +18,12 @@ Phase 4 以降（サービス登録・AIマッチング・営業メール生成�
 5. [Neon 設定方法](#5-neon-設定方法非エンジニア向け手順)
 6. [Claude API 設定](#6-claude-api-設定)
 7. [GビズINFO API 設定](#7-gビズinfo-api-設定)
-8. [Google API 設定](#8-google-api-設定)
+8. [Google API 設定](#8-google-api-設定) / [Brave Search・EDINET](#8-5-brave-search--edinet-api-設定任意)
 9. [環境変数一覧](#9-環境変数一覧)
 10. [DB migration 方法](#10-db-migration-方法)
 11. [DB 構成](#11-db-構成)
 12. [処理フローとジョブキュー](#12-処理フローとジョブキュー)
+12.5 [企業探索（Multi-Source Discovery）](#125-企業探索multi-source-discovery)
 13. [モックモードと実データの切り替え](#13-モックモードと実データの切り替え)
 14. [テスト / Lint / ビルド・実企業データ検証](#14-テスト--lint--ビルド)
 15. [Vercel デプロイ方法](#15-vercel-デプロイ方法)
@@ -35,7 +37,10 @@ Phase 4 以降（サービス登録・AIマッチング・営業メール生成�
 管理画面から「大阪府 / 製造業 / 100社」のように条件を指定すると、以下が自動で進みます。
 
 ```
-企業候補取得（GビズINFO） → 重複排除 → 公式HP特定（ルールベース信頼度0-100）
+企業候補の発見（GビズINFO / Google Places / Web検索 / EDINET）
+  → 情報統合（出所ごとの優先度で項目単位にマージ）
+  → 本人確認（Verification Score 0-100） → 重複排除 → 公式HP確認
+  → ここで初めて companies へ登録（確認できなかった候補は「確認待ち」に留める）
   → Webサイトクロール（最大20ページ / robots.txt 尊重）
   → 問い合わせ先・SNS・営業拒否表記の抽出
   → Claude による企業分析（事実と推測を分離 / 構造化JSON）
@@ -51,6 +56,8 @@ Phase 4 以降（サービス登録・AIマッチング・営業メール生成�
 - **hallucination 防止**: Web上で確認できた事実（`observed_facts`）と AI の推測（`inferences`）を分離保存、不明値は `null` / `unknown`、Evidence は実際にクロールした URL のみ保存
 - **営業拒否表記の検出**: ルールベース + AI。検出企業は `sales_contact_allowed = 'false'` となり `suppression_list` に自動登録され、将来の自動送信から必ず除外できる
 - **メールアドレスの推測生成は禁止**（サイト上の公開情報のみ）
+- **検索結果をそのまま企業DBに入れない**: 発見 → 本人確認 → 確認済 の順を必ず通し、確認できなかった候補は `discovery_candidates` に留めて人の承認を待つ
+- **Source of Truth は GビズINFO**（法人番号・商号・所在地）。Web検索由来の値でそれを上書きしない
 
 ## 2. 技術構成
 
@@ -75,18 +82,27 @@ Phase 4 以降（サービス登録・AIマッチング・営業メール生成�
 ├── drizzle/
 │   ├── 0000_init.sql               # 全テーブル / インデックス / FK（drizzle-kit generate で生成）
 │   ├── 0001_functions.sql          # ビュー / claim_job 等の PostgreSQL 関数 / トリガー（custom migration）
+│   ├── 0002_discovery.sql          # discovery_runs / discovery_candidates / company_sources
+│   ├── 0003_discovery_functions.sql # claim_job の discovery_runs 対応 / トリガー / dashboard_stats 更新
 │   └── meta/                       # drizzle-kit のスナップショット・ジャーナル
 ├── drizzle.config.ts               # drizzle-kit 設定（DATABASE_URL を .env.local から読む）
 ├── scripts/
 │   ├── seed.ts                     # 開発用ユーザー作成 + モック検索の実行
-│   └── run-jobs.ts                 # ローカル用ジョブランナー（Cron の代替）
+│   ├── run-jobs.ts                 # ローカル用ジョブランナー（Cron の代替）
+│   ├── preflight.ts                # 実API接続の事前診断（キー・モデル・情報源の利用可否）
+│   ├── discovery.ts                # 企業探索の実行 CLI（npm run discovery）
+│   ├── discovery-review.ts         # 確認待ちリストの確認 / 承認 / 却下 CLI
+│   ├── test-real.ts / verify.ts    # 実企業データ検証とレポート
+│   └── create-user.ts              # ログインユーザー作成
 ├── src/
 │   ├── app/
 │   │   ├── (auth)/login/           # ログイン
 │   │   ├── (app)/                  # 認証必須の管理画面
 │   │   │   ├── page.tsx            # ダッシュボード
 │   │   │   ├── companies/          # 企業一覧 / 詳細 / 手動追加
-│   │   │   ├── search/             # 企業を探す / 検索進捗
+│   │   │   ├── search/             # 企業を探す（探索フォーム）/ 旧検索の進捗
+│   │   │   ├── discovery/[id]/     # 探索の進捗（情報源ごとの内訳・候補一覧）
+│   │   │   ├── review/             # 確認待ちリスト（承認 / 却下 / 公式HP修正）
 │   │   │   ├── jobs/               # ジョブ状況・失敗再実行
 │   │   │   ├── logs/               # システムログ / AI API 使用量
 │   │   │   └── actions.ts          # Server Actions（検索開始・手動追加・再解析 等）
@@ -95,31 +111,45 @@ Phase 4 以降（サービス登録・AIマッチング・営業メール生成�
 │   │       ├── jobs/process/       # ジョブ処理エンドポイント（ユーザー or JOB_SECRET）
 │   │       ├── cron/process-jobs/  # Vercel Cron 用（CRON_SECRET）
 │   │       ├── search-jobs/[id]/   # 検索進捗 JSON
+│   │       ├── discovery-runs/[id]/ # 探索進捗 JSON
 │   │       └── companies/export/   # CSV エクスポート
 │   ├── components/
 │   │   ├── ui/                     # Button / Input / Table / Badge / Dialog ... (shadcn 互換)
 │   │   ├── layout/                 # サイドバー / ページヘッダー / モードバナー
 │   │   ├── companies/              # 企業テーブル / フィルタ / バッジ / 詳細セクション
 │   │   ├── search/                 # 検索進捗（ポーリング）
+│   │   ├── discovery/              # 探索進捗（情報源ごとの内訳）/ 確認待ちカード
 │   │   └── jobs/, dashboard/
 │   ├── db/                         # データアクセス層（Drizzle）
 │   │   ├── schema.ts               # Drizzle スキーマ（全テーブル + company_overview ビュー）
 │   │   ├── index.ts                # getDb()（Neon HTTP / ローカル pg の自動切替）
 │   │   ├── types.ts                # Row 型（旧 Database 型と同名で公開）
 │   │   ├── errors.ts               # PostgreSQL エラーコード判定
-│   │   └── repositories/           # companies / pages / analysis / jobs / logs / suppression
+│   │   └── repositories/           # companies / pages / analysis / jobs / logs / suppression / discovery
 │   ├── lib/
-│   │   ├── config/                 # env.ts（Zod で環境変数検証）/ ai.ts / crawler.ts
+│   │   ├── config/                 # env.ts（Zod で環境変数検証）/ ai.ts / crawler.ts / discovery.ts（重み・しきい値・予算）
 │   │   ├── auth/                   # Neon Auth: server.ts（createNeonAuth）/ session.ts（getCurrentUser / requireUser）
 │   │   ├── companies/              # normalize / dedupe / official-site / register / filters / csv / queries
 │   │   ├── integrations/
 │   │   │   ├── gbiz/               # GビズINFO クライアント + モック + マッピング
 │   │   │   ├── google-places/      # Places API クライアント + モック
 │   │   │   └── http/               # フェッチャー（文字コード判定）+ モックサイト生成
+│   │   ├── discovery/              # 企業探索
+│   │   │   ├── providers/          # gbiz / google-places / web-search / edinet / official-web + mock + registry
+│   │   │   ├── query-generator.ts  # 業種を細分化した検索語の生成
+│   │   │   ├── query-sharding.ts   # 市区町村 × 業種細分への分割
+│   │   │   ├── query-planner.ts    # どの Provider に何を投げるかの計画
+│   │   │   ├── aggregator.ts       # 実行・統合（Provider 単体の失敗を隔離）
+│   │   │   ├── deduplicator.ts     # 重複判定と出所優先度によるマージ
+│   │   │   ├── verifier.ts         # 本人確認スコア（0-100）
+│   │   │   ├── promote.ts          # 確認済み候補 → companies への昇格
+│   │   │   ├── review.ts           # 手動の承認 / 却下 / 公式HP修正
+│   │   │   ├── budget.ts / retry.ts # API 予算管理・指数バックオフ
+│   │   │   └── taxonomy.ts         # 業種の細分カテゴリ
 │   │   ├── crawler/                # robots / extract / classify / contacts / sales-restriction / crawl-site
 │   │   ├── ai/                     # provider 抽象 / anthropic / mock / schemas / prompts / context / analyze-company
 │   │   ├── scoring/                # 営業優先度スコア・ランク（決定論的）
-│   │   ├── jobs/                   # runner / search-job / crawl-job / analysis-job / enqueue / status / kick
+│   │   ├── jobs/                   # runner / discovery-job / search-job / crawl-job / analysis-job / enqueue / status / kick
 │   │   ├── logging/                # Logger（console + system_logs）
 │   │   └── api/                    # API 認可
 │   └── proxy.ts                    # Neon Auth middleware による未ログインリダイレクト（旧 middleware）
@@ -261,12 +291,28 @@ Neon Console の **Tables** で `companies` などが見えれば成功です。
 
 ## 8. Google API 設定
 
-任意です。公式サイト URL が GビズINFO に無い企業の **公式サイト候補探索** にのみ使用します。
+任意です。**地域の企業の発見**（Google Places Provider）と、公式サイト URL が GビズINFO に無い企業の **公式サイト候補探索** に使用します。
 
 1. Google Cloud Console で **Places API (New)** を有効化し API キーを発行
 2. `.env.local` に `GOOGLE_MAPS_API_KEY=...`
 
-未設定の場合は候補探索をスキップし、企業は「HPなし / 要確認」として登録されます（詳細画面から手動で URL を設定可能）。
+未設定の場合は Places を使わずに探索を続行します（他の情報源だけで動作します）。
+リクエストする項目は `id / displayName / formattedAddress / nationalPhoneNumber / websiteUri / primaryType` に限定しており、口コミ・写真等の課金項目は取得しません。
+
+## 8-5. Brave Search / EDINET API 設定（任意）
+
+どちらも未設定で構いません。設定すると探索の網羅性が上がります。
+
+| API | 用途 | 取得先 | 環境変数 |
+| --- | --- | --- | --- |
+| Brave Search | Web検索で企業候補・公式サイトを発見 | https://brave.com/search/api/ | `BRAVE_SEARCH_API_KEY` |
+| EDINET | 上場企業の裏付け（公的情報源として加点） | https://api.edinet-fsa.go.jp/ | `EDINET_API_KEY` |
+
+検索エンジンは `SearchEngine` インターフェースで抽象化しており（`src/lib/discovery/providers/web-search.ts`）、
+Brave 以外へ差し替える場合はこの interface を実装するだけで済みます。
+
+**注意**: Web検索由来の候補は最も確度が低い情報源として扱われ、単独では `verified` になりません（必ず本人確認を通ります）。
+利用規約で禁止されているサイト・ログイン必須サイト・CAPTCHA 保護サイト・robots.txt で禁止されたページはクロールしません。
 
 ## 9. 環境変数一覧
 
@@ -285,6 +331,14 @@ Neon Console の **Tables** で `companies` などが見えれば成功です。
 | `ANTHROPIC_EFFORT` | - | `low` / `medium`（既定） / `high` |
 | `GBIZ_API_KEY` | live時 | GビズINFO API トークン |
 | `GOOGLE_MAPS_API_KEY` | - | Google Places API キー（任意） |
+| `BRAVE_SEARCH_API_KEY` | - | Brave Search API キー（任意。Web検索での企業発見） |
+| `EDINET_API_KEY` | - | EDINET API キー（任意。上場企業の裏付け） |
+| `DISCOVERY_MODE` | - | `hybrid`（既定） / `gbiz` / `places` / `search`。使用する情報源 |
+| `DISCOVERY_MAX_PROVIDER_REQUESTS` | - | 1回の探索での Provider 呼び出し上限（既定 60） |
+| `DISCOVERY_MAX_CANDIDATES` | - | 1回の探索で保持する候補数の上限（既定 600） |
+| `DISCOVERY_MAX_VERIFICATION_REQUESTS` | - | 本人確認で行う HTTP 取得の上限（既定 300） |
+| `DISCOVERY_MAX_AI_CALLS` | - | 1回の探索で許可する AI 呼び出し上限（既定 200） |
+| `DISCOVERY_MAX_EXECUTION_MINUTES` | - | 1回の探索の実行時間上限（既定 60分） |
 | `CRON_SECRET` | Vercel | Vercel Cron が付与する Bearer トークン（Vercel 側で同名の環境変数を設定） |
 | `JOB_SECRET` | 推奨 | `/api/jobs/process` を外部から叩くための Bearer トークン |
 | `JOB_MAX_RUNTIME_MS` | - | 1回のジョブ処理の最大時間（既定 50000。Vercel の maxDuration 未満に） |
@@ -318,14 +372,17 @@ Neon Console の **Tables** で `companies` などが見えれば成功です。
 | `company_pages` | クロール済みページ（本文テキストのみ。raw HTML は保存しない） |
 | `company_analysis` | AI 分析結果（各スコア・ランク・課題・強み・事実/推測・分析理由・信頼度・トークン数）。履歴として複数行保持し `companies.latest_analysis_id` が最新を指す |
 | `company_analysis_evidence` | 分析根拠（カテゴリ / URL / 引用テキスト） |
-| `search_jobs` / `search_job_items` | 企業検索ジョブと検出企業（new / duplicate / skipped / failed） |
+| `discovery_runs` | 企業探索の実行単位。条件 / モード / フェーズ（discovering→verifying→promoting→done）/ 情報源ごとの統計 / 予算 / cursor |
+| `discovery_candidates` | 探索で見つけた企業候補。**確認を通るまで `companies` には入れない**。本人確認スコア・シグナル・情報源・採用シグナル・却下理由・昇格先 `company_id` |
+| `company_sources` | 企業情報の出所。どの Provider が何を観測したかを企業ごとにすべて残す（`(company_id, provider, external_id)` でユニーク） |
+| `search_jobs` / `search_job_items` | 企業検索ジョブと検出企業（new / duplicate / skipped / failed）。GビズINFO 単独の旧検索 |
 | `crawl_jobs` / `analysis_jobs` | クロール / 分析ジョブ（pending / processing / completed / failed / retrying / cancelled、試行回数、エラー） |
 | `system_logs` | 検索・登録・クロール・分析・API・エラーのログ |
 | `ai_usage_logs` | Claude API のトークン使用量 |
 | `suppression_list` | 営業拒否 / 配信停止 / 送信禁止 / 返信不要 の抑止リスト（企業・メール・ドメイン単位） |
 | `services`, `campaigns`, `email_templates`, `email_messages`, `email_replies`, `contacts`, `activities` | Phase 4 以降用（空でも動作） |
 | ビュー `company_overview` | 企業 + 最新分析をフラット化（一覧・CSV・ダッシュボード用） |
-| 関数 `claim_job` | `FOR UPDATE SKIP LOCKED` でジョブを取得し、同時実行時の二重処理を防止。stale な processing を自動復旧（Drizzle から `select claim_job(...)` で呼び出し） |
+| 関数 `claim_job` | `FOR UPDATE SKIP LOCKED` でジョブを取得し、同時実行時の二重処理を防止。stale な processing を自動復旧（`search_jobs` / `crawl_jobs` / `analysis_jobs` / `discovery_runs` に対応） |
 | 関数 `increment_search_job_counters`, `dashboard_stats` | カウンタのアトミック加算 / ダッシュボード集計 |
 | トリガー `set_updated_at` | `updated_at` の自動更新 |
 
@@ -334,12 +391,17 @@ Neon Console の **Tables** で `companies` などが見えれば成功です。
 1 リクエストで 100 社を同期処理せず、すべてジョブとして分割します。
 
 ```
-[企業を探す] → search_jobs 作成 → after() で即時処理開始
-   ├ search step: GビズINFO をページ単位で取得 → 条件判定 → 重複判定 → 登録 → crawl_jobs 投入
-   │              （時間切れなら cursor を保存して次回再開）
-   ├ crawl job : 公式HP判定（閾値 60 未満は "要確認" にして保存しない）→ クロール → 連絡先/SNS/営業拒否抽出 → analysis_jobs 投入
-   └ analysis  : コンテキスト構築 → Claude → Zod 検証 → スコアリング → 保存 → suppression_list 更新
+[企業を探す] → discovery_runs 作成 → after() で即時処理開始
+   ├ discovering: 複数 Provider へクエリを分割投入 → 統合 → 重複排除 → discovery_candidates に保存
+   │              （時間切れ・予算切れなら cursor を保存して次回再開）
+   ├ verifying  : 法人番号の確定 → 公式サイト確認 → 本人確認スコア算定
+   │              → verified / needs_review / rejected を確定
+   ├ promoting  : verified のみ companies へ登録 → company_sources を記録 → crawl_jobs 投入
+   ├ crawl job  : 公式HP判定（閾値 60 未満は "要確認" にして保存しない）→ クロール → 連絡先/SNS/営業拒否抽出 → analysis_jobs 投入
+   └ analysis   : コンテキスト構築 → Claude → Zod 検証 → スコアリング → 保存 → suppression_list 更新
 ```
+
+旧「検索ジョブ」（GビズINFO 単独）も `search_jobs` としてそのまま動作します。
 
 ジョブランナー（`src/lib/jobs/runner.ts`）は次の 3 経路で起動します。
 
@@ -351,6 +413,107 @@ Neon Console の **Tables** で `companies` などが見えれば成功です。
 
 失敗ジョブは `max_attempts`（3回）まで自動再試行し、超えると `failed`。ジョブ画面 / 検索進捗画面から **失敗した企業のみ再実行** できます。
 
+## 12.5 企業探索（Multi-Source Discovery）
+
+### 何をしているか
+
+1 つの情報源だけでは、日本の中小企業は取りこぼします（GビズINFO には URL が無い、地図には載っているが法人番号が分からない、など）。
+そこで **複数の情報源から候補を集め、突き合わせてから企業として確定** します。
+
+```
+複数ソースから発見 → 情報統合 → 本人確認 → 重複排除 → 公式サイト確認 → 営業候補企業へ昇格
+```
+
+### 情報源（Provider）
+
+| Provider | 役割 | 単体の確度 | 必要なキー |
+| --- | --- | --- | --- |
+| GビズINFO | **Source of Truth**。法人番号・商号・所在地の正 | 90 | `GBIZ_API_KEY` |
+| EDINET | 上場企業の裏付け | 85 | `EDINET_API_KEY`（任意） |
+| 公式サイト確認 | 会社名・所在地・電話・ドメインの照合 | 判定結果 | 不要 |
+| Google Places | 地域の中小企業・工場の発見 | 65 | `GOOGLE_MAPS_API_KEY`（任意） |
+| Web検索 | 取りこぼしの補完・公式サイト候補 | 30 | `BRAVE_SEARCH_API_KEY`（任意） |
+
+キーが無い Provider は **探索全体を止めずにスキップ** し、理由が進捗画面と `npm run preflight` に表示されます。
+
+### クエリの分割（Query Planning）
+
+「大阪府 製造業」の 1 クエリでは数十社しか取れません。次のように分割します。
+
+- **業種の細分化**: 製造業 → 金属加工 / 精密加工 / 機械製造 / 自動車部品 / 樹脂 / 印刷 …（`taxonomy.ts`）
+- **市区町村での分割**: 大阪府 → 大阪市 / 東大阪市 / 堺市 / 八尾市 …（`query-sharding.ts`）
+- **ページング**: GビズINFO は shard ごとにページを進める
+- 目標件数に届かない場合のみ、未使用の shard・検索語で **追加探索** します
+
+### 情報の統合（Source of Truth）
+
+同じ企業が複数の情報源から見つかった場合、**項目ごとに** 優先度の高い出所の値を採用します
+（`gbiz 100 > edinet 90 > official_web 80 > google_places 60 > web_search 30`）。
+低い出所の値で既存の値を上書きすることはありません。観測はすべて `company_sources` に残るため、
+企業詳細画面の「情報源」セクションで **どの値がどこから来たか** を後から確認できます。
+
+### 本人確認（Verification Score 0-100）
+
+| シグナル | 配点 |
+| --- | --- |
+| 法人番号あり | 40 |
+| 公式サイトに会社名 | 20 |
+| 所在地が一致 | 15 |
+| 電話番号が一致 | 10 |
+| 公式ドメイン確認 | 10 |
+| 公的情報源で確認（GビズINFO / EDINET） | 10 |
+| 複数の情報源で一致 | 5 |
+
+- **80点以上 → `verified`**: `companies` へ昇格し、クロール・AI分析へ進みます
+- **60点以上 → `needs_review`**: 「確認待ちリスト」に入り、**人が承認するまで企業登録されません**
+- **60点未満 → `rejected`**: 登録しません
+
+配点としきい値は `src/lib/config/discovery.ts` の 1 箇所で変更できます。
+
+### 重複排除
+
+`法人番号 > ドメイン > 電話番号 > 社名+所在地 > 社名+市区町村 > 社名の類似度（0.88以上・同一市区町村）` の順に判定します。
+既存の `companies` とも突き合わせ、登録済みの企業は `duplicate` として記録するだけで再登録しません。
+
+### API 予算
+
+1 回の探索で使える Provider 呼び出し・候補数・確認リクエスト・AI 呼び出し・実行時間に上限があります（`DISCOVERY_MAX_*`）。
+上限に達すると **その時点までの結果を保存して安全に停止** し、`partially_completed` になります。
+探索件数が少ない場合は上限も自動的に縮小されます（`scaleBudgetForRequest`）。
+
+### 確認待ちリスト（Review Queue）
+
+画面: **サイドバー → 確認待ち**（`/review`）
+
+- 本人確認スコアと、どのシグナルが一致 / 不一致だったかを表示
+- **承認** → `companies` へ登録し、クロール・AI分析へ
+- **対象外にする** → 却下（登録しません）
+- **公式サイトを修正して再確認** → URL を直して自動確認をやり直し
+
+CLI からも操作できます。
+
+```bash
+npm run discovery:review                                   # 一覧
+npm run discovery:review -- --approve <candidate-id>       # 承認
+npm run discovery:review -- --reject <candidate-id> --reason "理由"
+```
+
+### CLI での実行
+
+```bash
+# 大阪府 / 製造業 / 20社 を探索（DATA_MODE=live なら実API）
+npm run discovery -- --prefecture 大阪府 --industry manufacturing --count 20
+
+# 情報源を限定する
+npm run discovery -- --prefecture 大阪府 --industry manufacturing --count 20 --mode gbiz
+
+# 業種詳細を指定する
+npm run discovery -- --prefecture 大阪府 --subcategory precision_processing --count 20
+
+# モックデータで動作だけ確認する（API を消費しません）
+npm run discovery:mock -- --count 12
+```
+
 ## 13. モックモードと実データの切り替え
 
 `DATA_MODE=mock` では次がモックに置き換わります（本番コードとモックは Provider インターフェースで分離）。
@@ -359,6 +522,7 @@ Neon Console の **Tables** で `companies` などが見えれば成功です。
 | --- | --- | --- |
 | GビズINFO | `integrations/gbiz/client.ts` | `integrations/gbiz/mock.ts`（決定論的なダミー法人 180 社） |
 | Google Places | `integrations/google-places/index.ts` | 同ファイル内 `MockPlacesProvider` |
+| 探索 Provider 群 | `discovery/providers/{gbiz,google-places,web-search,edinet}.ts` | `discovery/providers/mock.ts`（情報源ごとに意図的に重複する候補を返す） |
 | Claude | `ai/anthropic.ts` | `ai/mock.ts`（クロール結果からヒューリスティックに分析） |
 | Web サイト | 実 HTTP | `mock-*.example.jp` ドメインのみ合成 HTML（`integrations/http/mock-site.ts`） |
 
@@ -370,7 +534,9 @@ Neon Console の **Tables** で `companies` などが見えれば成功です。
 ```bash
 npm run lint        # ESLint
 npm run typecheck   # tsc --noEmit
-npm test            # Vitest（重複判定 / URL正規化 / メール抽出 / 営業拒否判定 / AIスキーマ / スコア計算 / クローラー / 実サイト相当のフィクスチャ）
+npm test            # Vitest（重複判定 / URL正規化 / メール抽出 / 営業拒否判定 / AIスキーマ / スコア計算 / クローラー /
+                    #         実サイト相当のフィクスチャ / クエリ生成・分割 / 情報統合 / 本人確認スコア /
+                    #         API予算・再試行 / Provider 失敗の隔離 / 公式サイト確認）
 npm run build       # next build
 ```
 
@@ -397,6 +563,22 @@ npm run verify -- --job <検索ジョブID>
 - ハルシネーション検査（Evidence URL の実在性 / メールが本文に実在するか / 営業拒否企業の抑止リスト登録 / 根拠なく「営業可」と判定していないか / 事実と推測の分離 / 重複 / スコア範囲）
 
 段階的に `--count 10` → `50` → `100` と増やし、各段階でレポートの精度指標と検査結果を確認してから次に進んでください。
+
+### 企業探索の実データ検証
+
+```bash
+# 1. 接続診断（情報源ごとの利用可否・本人確認しきい値・予算も表示されます）
+npm run preflight
+
+# 2. 大阪府 / 製造業 / 20社 を探索
+npm run discovery -- --prefecture 大阪府 --industry manufacturing --count 20
+
+# 3. 自動確認できなかった候補を人が確認する
+npm run discovery:review
+```
+
+`npm run discovery` は探索完了後に、情報源ごとの統計・確認済み一覧・確認待ち一覧・却下理由を表示します。
+**確認済みになった企業だけが `companies` に登録されている** ことを、この出力と企業一覧の両方で確認してください。
 
 ## 15. Vercel デプロイ方法
 
@@ -438,8 +620,9 @@ npm run verify -- --job <検索ジョブID>
 - 営業メール自動生成・送信（Gmail API）、問い合わせフォーム自動送信、AI返信、追客、営業サービス提案生成
 - サービス（`services`）の登録 UI と企業 × サービスのマッチング
 - 商談化率 / 返信率の分析ダッシュボード
-- 検索条件「採用活動の有無」の事前絞り込み（分析後に一覧フィルタで対応）
-- 企業情報の手動編集フォーム（連絡可否・公式サイトの手動設定のみ対応）
+- 企業情報の手動編集フォーム（連絡可否・公式サイト・確認待ち候補の承認のみ対応）
+- 自治体・工業会などの公開企業一覧ページの自動スクレイピング（検索語の生成のみ行い、一覧ページ自体の解析は未実装）
+- 探索条件の保存・定期実行（Cron からの自動探索）
 
 **次フェーズで実装すべき内容（DB は準備済み）**
 
@@ -449,3 +632,5 @@ npm run verify -- --job <検索ジョブID>
 4. `contacts` の担当者抽出（代表者・採用担当など）
 5. 定期再クロール（`last_crawled_at` ベース）と分析差分の通知
 6. 商談化率 / 返信率の集計（`activities`）
+7. 探索条件のテンプレート保存と定期実行（`discovery_runs` を Cron から作成）
+8. 公開企業一覧ページ（自治体・工業会）の解析による候補発見の上積み

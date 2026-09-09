@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils/cn";
-import type { JobStatus, SalesContactAllowed, SalesRank, VerificationStatus } from "@/db/types";
+import type { DiscoveryCandidateStatus, DiscoveryRunStatus, JobStatus, SalesContactAllowed, SalesRank, VerificationStatus } from "@/db/types";
 
 export function RankBadge({ rank }: { rank: SalesRank | null | undefined }) {
   if (!rank) return <span className="text-muted-foreground">—</span>;
@@ -67,4 +67,31 @@ export function JobStatusBadge({ status }: { status: JobStatus }) {
 export function YesNo({ value }: { value: boolean | null | undefined }) {
   if (value === null || value === undefined) return <span className="text-muted-foreground">—</span>;
   return value ? <span className="text-emerald-600">●</span> : <span className="text-muted-foreground">–</span>;
+}
+
+export function DiscoveryRunStatusBadge({ status }: { status: DiscoveryRunStatus }) {
+  const map: Record<DiscoveryRunStatus, { label: string; variant: "success" | "warning" | "muted" | "info" | "danger" }> = {
+    pending: { label: "待機中", variant: "muted" },
+    running: { label: "探索中", variant: "info" },
+    completed: { label: "完了", variant: "success" },
+    partially_completed: { label: "一部完了", variant: "warning" },
+    failed: { label: "失敗", variant: "danger" },
+    cancelled: { label: "中止", variant: "muted" },
+  };
+  const m = map[status] ?? map.pending;
+  return <Badge variant={m.variant}>{m.label}</Badge>;
+}
+
+export function CandidateStatusBadge({ status }: { status: DiscoveryCandidateStatus }) {
+  const map: Record<DiscoveryCandidateStatus, { label: string; variant: "success" | "warning" | "muted" | "info" | "danger" }> = {
+    discovered: { label: "発見", variant: "muted" },
+    verifying: { label: "確認中", variant: "info" },
+    verified: { label: "確認済", variant: "success" },
+    needs_review: { label: "要確認", variant: "warning" },
+    duplicate: { label: "登録済", variant: "muted" },
+    rejected: { label: "対象外", variant: "muted" },
+    failed: { label: "失敗", variant: "danger" },
+  };
+  const m = map[status] ?? map.discovered;
+  return <Badge variant={m.variant}>{m.label}</Badge>;
 }

@@ -2,6 +2,9 @@ import type { Db } from "@/db";
 import type { Json } from "@/db/types";
 import { updateCompanyWhereCrawlStatusIn } from "@/db/repositories/companies";
 import { findActiveJobId, insertAnalysisJob, insertCrawlJob, insertSearchJob, retryFailedJobs as repoRetryFailedJobs, retryFailedSearchJobs } from "@/db/repositories/jobs";
+import { insertDiscoveryRun } from "@/db/repositories/discovery";
+import { getDiscoveryConfig, scaleBudgetForRequest } from "@/lib/config/discovery";
+import type { DiscoveryCriteria, DiscoveryMode } from "@/lib/discovery/types";
 import type { CompanySearchConditions } from "@/lib/integrations/gbiz/types";
 
 /** クロールジョブを追加（同一企業の pending/retrying/processing があれば追加しない） */
@@ -45,6 +48,28 @@ export async function createSearchJob(
     created_by: options.createdBy ?? null,
     provider: options.provider ?? null,
   });
+}
+
+/**
+ * 企業探索（Discovery Run）を登録する。
+ * 実際の探索はジョブランナーがステップ実行するため、ここでは 1 行作るだけ。
+ */
+export async function createDiscoveryRun(
+  db: Db,
+  criteria: DiscoveryCriteria,
+  options: { name?: string; mode?: DiscoveryMode; createdBy?: string | null } = {},
+): Promise<string> {
+  const cfg = getDiscoveryConfig();
+  const mode = options.mode ?? cfg.mode;
+  const run = await insertDiscoveryRun(db, {
+    name: options.name ?? null,
+    criteria: criteria as unknown as Json,
+    mode,
+    requested_count: criteria.maxResults,
+    budget: scaleBudgetForRequest(cfg.budget, criteria.maxResults) as unknown as Json,
+    created_by: options.createdBy ?? null,
+  });
+  return run.id;
 }
 
 /** 失敗したジョブを再実行可能にする（失敗企業のみ再実行） */

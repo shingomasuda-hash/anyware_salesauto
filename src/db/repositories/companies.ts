@@ -118,5 +118,6 @@ export async function getDashboardStats(db: Db): Promise<DashboardStats> {
     sales_restricted: n(d.sales_restricted),
     website_unverified: n(d.website_unverified),
     pending_jobs: n(d.pending_jobs),
+    needs_review_candidates: n(d.needs_review_candidates),
   };
 }

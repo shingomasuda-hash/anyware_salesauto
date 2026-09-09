@@ -18,6 +18,13 @@ export type {
   RecruitingStatus,
   LogLevel,
   SuppressionReason,
+  DiscoveryProviderName,
+  DiscoveryMode,
+  DiscoveryRunStatus,
+  DiscoveryPhase,
+  DiscoveryCandidateStatus,
+  RecruitingSignal,
+  CompanySourceType,
 } from "./schema";
 
 export type CompanyRow = typeof s.companies.$inferSelect;
@@ -44,6 +51,12 @@ export type EmailMessageRow = typeof s.emailMessages.$inferSelect;
 export type EmailReplyRow = typeof s.emailReplies.$inferSelect;
 export type ActivityRow = typeof s.activities.$inferSelect;
 export type CompanyOverviewRow = typeof s.companyOverview.$inferSelect;
+export type DiscoveryRunRow = typeof s.discoveryRuns.$inferSelect;
+export type DiscoveryRunInsert = typeof s.discoveryRuns.$inferInsert;
+export type DiscoveryCandidateRow = typeof s.discoveryCandidates.$inferSelect;
+export type DiscoveryCandidateInsert = typeof s.discoveryCandidates.$inferInsert;
+export type CompanySourceRow = typeof s.companySources.$inferSelect;
+export type CompanySourceInsert = typeof s.companySources.$inferInsert;
 
 export interface DashboardStats {
   total_companies: number;
@@ -54,4 +67,6 @@ export interface DashboardStats {
   sales_restricted: number;
   website_unverified: number;
   pending_jobs: number;
+  /** 承認待ちの探索候補（companies にはまだ入っていない） */
+  needs_review_candidates: number;
 }
