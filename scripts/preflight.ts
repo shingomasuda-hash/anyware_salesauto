@@ -93,8 +93,13 @@ async function checkGbiz() {
     const client = new GbizClient(env.GBIZ_API_KEY);
     const page = await client.search({ prefecture: "大阪府", requestedCount: 1 }, 1, 1);
     const sample = page.items[0];
-    const fields = sample ? Object.keys(sample).filter((k) => sample[k as keyof typeof sample] !== null).slice(0, 8).join(", ") : "(0件)";
-    record("GBIZ_API_KEY", "OK", `検索成功（総件数 ${page.totalCount}）。取得できた項目例: ${fields}`);
+    if (!sample) {
+      return record("GBIZ_API_KEY", "NG", "認証は通りましたが企業を1件も取得できませんでした（条件またはAPI仕様を確認してください）");
+    }
+    const fields = Object.keys(sample).filter((k) => sample[k as keyof typeof sample] !== null).slice(0, 8).join(", ");
+    // totalCount は API が返さない場合があるため、実際に取得できた件数を主に報告する
+    const total = page.totalCount > 0 ? `総件数 ${page.totalCount}` : "総件数の申告なし（APIが返さないため件数上限は使いません）";
+    record("GBIZ_API_KEY", "OK", `検索成功（取得 ${page.items.length}件 / ${total}）。取得できた項目例: ${fields}`);
     if (sample && !sample.company_url) {
       console.log("   ℹ️ 1件目に company_url がありません。URL 未登録の法人は Google Places で公式サイトを探索します（GOOGLE_MAPS_API_KEY 推奨）");
     }
