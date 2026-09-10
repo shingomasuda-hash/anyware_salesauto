@@ -20,6 +20,8 @@ interface Spec {
   expected?: string;
   /** 値を表示してよい非機密変数か */
   showValue?: boolean;
+  /** 未設定でも動作する場合の既定の挙動 */
+  fallback?: string;
 }
 
 const SPECS: Spec[] = [
@@ -31,7 +33,14 @@ const SPECS: Spec[] = [
   { name: "BRAVE_SEARCH_API_KEY", need: "recommended", purpose: "Web検索（取りこぼしの補完）" },
   { name: "EDINET_API_KEY", need: "optional", purpose: "EDINET（上場企業の裏付け）" },
   { name: "DATA_MODE", need: "required", purpose: "実APIを使うか", expected: "live", showValue: true },
-  { name: "DISCOVERY_MODE", need: "required", purpose: "使用する情報源", expected: "hybrid", showValue: true },
+  {
+    name: "DISCOVERY_MODE",
+    need: "recommended",
+    purpose: "使用する情報源",
+    expected: "hybrid",
+    showValue: true,
+    fallback: "未設定でも既定の hybrid で動作します（明示設定を推奨）",
+  },
   // Live Test を成立させるために併せて必要なもの
   { name: "NEON_AUTH_BASE_URL", need: "recommended", purpose: "管理画面のログイン" },
   { name: "NEON_AUTH_COOKIE_SECRET", need: "recommended", purpose: "セッション Cookie 署名" },
@@ -41,7 +50,7 @@ const SPECS: Spec[] = [
 function describe(spec: Spec): { set: boolean; detail: string } {
   const raw = process.env[spec.name];
   const value = (raw ?? "").trim();
-  if (!value) return { set: false, detail: "未設定" };
+  if (!value) return { set: false, detail: spec.fallback ? `未設定 → ${spec.fallback}` : "未設定" };
   if (spec.showValue) {
     const ok = spec.expected ? value === spec.expected : true;
     return { set: true, detail: ok ? `${value}` : `${value}（期待値: ${spec.expected}）` };
@@ -81,7 +90,7 @@ function main() {
   }
   if (missingRecommended.length > 0) {
     console.log(`\n[推奨・未設定 ${missingRecommended.length}件] 無くても動作しますが精度・網羅性が落ちます:`);
-    for (const m of missingRecommended) console.log(`  - ${m.name}（${m.purpose}）`);
+    for (const m of missingRecommended) console.log(`  - ${m.name}（${m.purpose}）${m.fallback ? ` ※${m.fallback}` : ""}`);
   }
   if (missingOptional.length > 0) {
     console.log(`\n[任意・未設定 ${missingOptional.length}件]:`);
