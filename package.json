@@ -18,11 +18,13 @@
     "jobs:run": "tsx scripts/run-jobs.ts",
     "auth:create-user": "tsx scripts/create-user.ts",
     "preflight": "tsx scripts/preflight.ts",
+    "env:check": "tsx scripts/env-check.ts",
     "test:real": "tsx scripts/test-real.ts",
     "verify": "tsx scripts/verify.ts",
     "discovery": "tsx scripts/discovery.ts",
     "discovery:mock": "DATA_MODE=mock tsx scripts/discovery.ts",
-    "discovery:review": "tsx scripts/discovery-review.ts"
+    "discovery:review": "tsx scripts/discovery-review.ts",
+    "discovery:verify": "tsx scripts/discovery-verify.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.123.0",

@@ -2,8 +2,8 @@ import type { Db } from "@/db";
 import type { DiscoveryCandidateInsert, DiscoveryCandidateRow, DiscoveryRunRow, Json } from "@/db/types";
 import {
   claimCandidatesForVerification,
-  countCandidatesByStatus,
   findKnownMatches,
+  refreshDiscoveryRunCounts,
   insertCandidates,
   listCandidatesByRun,
   listPromotableCandidates,
@@ -144,10 +144,10 @@ async function runDiscoveringPhase(
   }
 
   if (batch.length === 0) {
-    await logger.info("候補の発見を完了", { discovered: seed.length, requested: run.requested_count });
+    const counts = await refreshDiscoveryRunCounts(db, run.id);
+    await logger.info("候補の発見を完了", { discovered: counts.discovered, duplicate: counts.byStatus.duplicate, requested: run.requested_count });
     await updateDiscoveryRun(db, run.id, {
       phase: "verifying",
-      discovered_count: seed.length,
       provider_stats: stats as unknown as Json,
       cursor: { ...cursor, queryIndex: startIndex } as unknown as Json,
     });
@@ -165,10 +165,10 @@ async function runDiscoveringPhase(
   cursor.executedQueryIds = [...executed, ...result.executedQueryIds].slice(-500);
   cursor.stoppedReason = result.stoppedReason;
 
-  const discovered = seed.length + saved.discovered;
+  // カウンタは加算せず、保存済みの候補から引き直す（ステップ実行でのズレを防ぐ）
+  const counts = await refreshDiscoveryRunCounts(db, run.id);
+  const discovered = counts.discovered;
   await updateDiscoveryRun(db, run.id, {
-    discovered_count: discovered,
-    duplicate_count: run.duplicate_count + saved.duplicate,
     provider_stats: stats as unknown as Json,
     cursor: { ...cursor, usage: context.budget.usage } as unknown as Json,
   });
@@ -176,7 +176,9 @@ async function runDiscoveringPhase(
     queries: batch.length,
     new: saved.discovered,
     duplicate: saved.duplicate,
-    total: discovered,
+    // 発見数は重複（既に登録済みの企業）を除いた新規候補数
+    discovered,
+    duplicateTotal: counts.byStatus.duplicate,
     stoppedReason: result.stoppedReason,
   });
 
@@ -184,7 +186,7 @@ async function runDiscoveringPhase(
   const enough = discovered >= run.requested_count;
   if (exhausted || enough) {
     if (exhausted) await logger.warn("探索の予算に達したため発見フェーズを終了", { reason: exhausted });
-    await updateDiscoveryRun(db, run.id, { phase: "verifying", discovered_count: discovered, provider_stats: stats as unknown as Json });
+    await updateDiscoveryRun(db, run.id, { phase: "verifying", provider_stats: stats as unknown as Json });
   }
   return "continue";
 }
@@ -263,15 +265,9 @@ async function runVerifyingPhase(
 ): Promise<StepOutcome> {
   const pending = await claimCandidatesForVerification(db, run.id, VERIFY_BATCH);
   if (pending.length === 0) {
-    const counts = await countCandidatesByStatus(db, run.id);
-    await logger.info("本人確認を完了", counts);
-    await updateDiscoveryRun(db, run.id, {
-      phase: "promoting",
-      verified_count: counts.verified,
-      needs_review_count: counts.needs_review,
-      rejected_count: counts.rejected,
-      duplicate_count: counts.duplicate,
-    });
+    const counts = await refreshDiscoveryRunCounts(db, run.id);
+    await logger.info("本人確認を完了", counts.byStatus);
+    await updateDiscoveryRun(db, run.id, { phase: "promoting" });
     return "continue";
   }
 
@@ -292,11 +288,8 @@ async function runVerifyingPhase(
     }
   }
 
-  const counts = await countCandidatesByStatus(db, run.id);
+  await refreshDiscoveryRunCounts(db, run.id);
   await updateDiscoveryRun(db, run.id, {
-    verified_count: counts.verified,
-    needs_review_count: counts.needs_review,
-    rejected_count: counts.rejected,
     provider_stats: stats as unknown as Json,
     cursor: { ...cursor, usage: context.budget.usage } as unknown as Json,
   });
@@ -392,26 +385,26 @@ async function runPromotingPhase(db: Db, run: DiscoveryRunRow, criteria: Discove
   const remaining = Math.max(0, run.requested_count - run.promoted_count);
   const rows = remaining > 0 ? await listPromotableCandidates(db, run.id, Math.min(PROMOTE_BATCH, remaining)) : [];
   if (rows.length === 0) {
-    const counts = await countCandidatesByStatus(db, run.id);
+    const counts = await refreshDiscoveryRunCounts(db, run.id);
     // 目標件数に届いていれば、途中で予算上限に達していても「完了」とする
-    const partial = counts.verified < run.requested_count && run.promoted_count < run.requested_count;
+    const partial = counts.byStatus.verified < run.requested_count && counts.promoted < run.requested_count;
     await updateDiscoveryRun(db, run.id, {
       phase: "done",
       status: partial ? "partially_completed" : "completed",
-      verified_count: counts.verified,
-      needs_review_count: counts.needs_review,
-      rejected_count: counts.rejected,
-      duplicate_count: counts.duplicate,
       completed_at: new Date().toISOString(),
       locked_at: null,
       error: null,
     });
-    await logger.info("企業探索が完了", { ...counts, promoted: run.promoted_count, requested: run.requested_count });
+    await logger.info("企業探索が完了", {
+      ...counts.byStatus,
+      discovered: counts.discovered,
+      promoted: counts.promoted,
+      requested: run.requested_count,
+    });
     return "completed";
   }
 
   const companyLogger = logger.child({ category: "company" });
-  let promoted = run.promoted_count;
   for (const row of rows) {
     if (Date.now() > deadline) break;
     try {
@@ -426,7 +419,6 @@ async function runPromotingPhase(db: Db, run: DiscoveryRunRow, criteria: Discove
         companyLogger,
       );
       // 既存企業と一致した場合も「営業候補として確定した」件数に数える（重複登録はしていない）
-      promoted += 1;
       if (!result.created) await logger.info("既に登録済みの企業に紐づけ", { candidate: row.name, companyId: result.companyId });
     } catch (err) {
       await logger.error("候補の昇格に失敗", { candidate: row.name, ...serializeError(err) });
@@ -434,8 +426,9 @@ async function runPromotingPhase(db: Db, run: DiscoveryRunRow, criteria: Discove
     }
   }
 
-  await updateDiscoveryRun(db, run.id, { promoted_count: promoted });
-  await logger.info("営業候補企業へ昇格", { promoted, batch: rows.length });
+  // 昇格数も company との紐づけ実データから引き直す
+  const counts = await refreshDiscoveryRunCounts(db, run.id);
+  await logger.info("営業候補企業へ昇格", { promoted: counts.promoted, batch: rows.length });
   return "continue";
 }
 

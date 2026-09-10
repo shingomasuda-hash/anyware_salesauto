@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import { companyOverview } from "@/db/schema";
 import type { OverviewQuery } from "@/db/repositories/companies";
 
@@ -90,7 +90,9 @@ export function buildCompanyWhere(f: CompanyFilters): SQL | undefined {
   if (f.hasWebsite) c.push(eq(v.has_website, true));
   if (f.hasContact) c.push(eq(v.has_contact, true));
   if (f.hasEmail) c.push(eq(v.has_email, true));
-  if (f.excludeRestricted) c.push(ne(v.sales_contact_allowed, "false"));
+  // 営業対象の絞り込みでは「不明（未確認）」も除外する。
+  // 営業拒否表記を確認できていない企業を、営業可能として扱わないため。
+  if (f.excludeRestricted) c.push(eq(v.sales_contact_allowed, "true"));
   if (f.unanalyzed) c.push(isNull(v.analysis_id));
   if (f.needsReview) c.push(inArray(v.verification_status, ["needs_review", "unverified"]));
   return c.length ? and(...c) : undefined;

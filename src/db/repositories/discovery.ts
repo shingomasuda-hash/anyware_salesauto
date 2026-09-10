@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
 import type { Db } from "../index";
 import { companies, companySources, discoveryCandidates, discoveryRuns } from "../schema";
 import type {
@@ -87,6 +87,59 @@ export async function countCandidatesByStatus(db: Db, runId: string): Promise<Re
   };
   for (const r of rows) result[r.status] = r.count;
   return result;
+}
+
+/**
+ * 営業候補企業へ昇格した候補の数。
+ * duplicate の候補も既存企業を指して company_id を持つため、status='verified' に限定する
+ * （重複検出は昇格ではない）。
+ */
+export async function countPromotedCandidates(db: Db, runId: string): Promise<number> {
+  const rows = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(discoveryCandidates)
+    .where(
+      and(
+        eq(discoveryCandidates.run_id, runId),
+        eq(discoveryCandidates.status, "verified"),
+        isNotNull(discoveryCandidates.company_id),
+      ),
+    );
+  return rows[0]?.count ?? 0;
+}
+
+export interface DiscoveryRunCounts {
+  byStatus: Record<DiscoveryCandidateStatus, number>;
+  /** 重複（既に登録済みの企業）を除いた新規候補数 */
+  discovered: number;
+  /** 保存した候補の総数（重複を含む） */
+  total: number;
+  promoted: number;
+}
+
+/**
+ * discovery_runs のカウンタを discovery_candidates の実データから再計算する。
+ *
+ * カウンタを加算方式で持つと、ステップ実行のやり直しや手動レビュー（承認・却下）で
+ * 実データとズレる。集計は必ず実データから引き直す。
+ *
+ * discovered_count は重複を除いた新規候補数。duplicate_count は別軸（既に登録済みの企業）で、
+ * discovered_count には含めない。
+ */
+export async function refreshDiscoveryRunCounts(db: Db, runId: string): Promise<DiscoveryRunCounts> {
+  const byStatus = await countCandidatesByStatus(db, runId);
+  const promoted = await countPromotedCandidates(db, runId);
+  const total = Object.values(byStatus).reduce((sum, n) => sum + n, 0);
+  const discovered = total - byStatus.duplicate;
+  await updateDiscoveryRun(db, runId, {
+    discovered_count: discovered,
+    verified_count: byStatus.verified,
+    needs_review_count: byStatus.needs_review,
+    duplicate_count: byStatus.duplicate,
+    rejected_count: byStatus.rejected,
+    promoted_count: promoted,
+  });
+  return { byStatus, discovered, total, promoted };
 }
 
 /** 既存の候補・企業と突き合わせて、すでに知っている企業かを判定する材料を取る */

@@ -470,6 +470,21 @@ Brave 以外へ差し替える場合はこの interface を実装するだけで
 
 配点としきい値は `src/lib/config/discovery.ts` の 1 箇所で変更できます。
 
+### 集計の見方（重要）
+
+候補の集計は **2つの軸** に分かれています。足し合わせないでください。
+
+| 軸 | 意味 |
+| --- | --- |
+| **新規候補数**（`discovered_count`） | 今回はじめて見つけた候補。`確認済 + 要確認 + 対象外 + 確認中 + 失敗` の合計 |
+| **重複**（`duplicate_count`） | すでに `companies` に登録済みだった候補。**新規候補数には含みません** |
+
+`新規候補数 + 重複 = 保存した候補の総数` になります。
+例: 全66件 = 新規候補49件（確認済16 / 要確認17 / 対象外16）+ 重複17件。
+
+これらのカウンタは加算ではなく **`discovery_candidates` の実データから毎回引き直します**。
+確認待ちリストでの承認・却下でも数字がズレません。
+
 ### 重複排除
 
 `法人番号 > ドメイン > 電話番号 > 社名+所在地 > 社名+市区町村 > 社名の類似度（0.88以上・同一市区町村）` の順に判定します。
@@ -497,6 +512,17 @@ npm run discovery:review                                   # 一覧
 npm run discovery:review -- --approve <candidate-id>       # 承認
 npm run discovery:review -- --reject <candidate-id> --reason "理由"
 ```
+
+### 検証レポート
+
+```bash
+npm run env:check          # Live 実行に必要な環境変数の充足チェック（値は表示しません）
+npm run discovery:verify   # 直近の探索ランを検証（企業ごとの結果・精度指標・Provider別貢献・安全検査）
+npm run discovery:verify -- --run <run-id>
+```
+
+`discovery:verify` は **GビズINFO / Google Places / Web検索それぞれでしか見つからなかった企業** を集計するため、
+Multi-Source 化に実際の上積みがあったかを数字で確認できます。
 
 ### CLI での実行
 

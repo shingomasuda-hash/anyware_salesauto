@@ -57,14 +57,48 @@ describe("verifyCandidate", () => {
     expect(r.unmatched).toContain("公式ドメイン確認");
   });
 
-  it("スコアは 0-100 に収まる", () => {
-    const r = verifyCandidate(candidate({ sources: ["gbiz", "edinet", "google_places", "web_search"] }), {
+  it("配点の合計は 100 を超える（cap が必要な設計であることを明示）", () => {
+    const { weights } = getDiscoveryConfig();
+    const rawMax = Object.values(weights).reduce((sum, w) => sum + w, 0);
+    expect(rawMax).toBeGreaterThan(100);
+  });
+
+  it("全シグナル一致でも 100 で cap される（0-100 に正規化）", () => {
+    const perfect = candidate({ sources: ["gbiz", "edinet", "google_places", "web_search"] });
+    const r = verifyCandidate(perfect, {
       websiteText: SITE_TEXT,
       websiteTitle: "株式会社山田製作所",
       officialSiteConfidence: 100,
     });
-    expect(r.score).toBeLessThanOrEqual(100);
-    expect(r.score).toBeGreaterThanOrEqual(0);
+    // 全項目一致 → 素点 110 だが、保存・表示されるスコアは 100
+    expect(r.signals.every((sig) => sig.matched)).toBe(true);
+    const rawTotal = r.signals.reduce((sum, sig) => sum + sig.points, 0);
+    expect(rawTotal).toBeGreaterThan(100);
+    expect(r.score).toBe(100);
+  });
+
+  it("シグナルが 1 つも一致しなくても 0 未満にならない", () => {
+    const bare = candidate({ corporateNumber: null, phone: null, domain: null, sources: ["web_search"], source: "web_search" });
+    const r = verifyCandidate(bare, {});
+    expect(r.score).toBe(0);
+    expect(r.status).toBe("rejected");
+  });
+
+  it("どの入力でもスコアは 0-100 の整数に収まる", () => {
+    const cases = [
+      candidate(),
+      candidate({ corporateNumber: null }),
+      candidate({ sources: ["gbiz", "edinet", "google_places", "web_search", "official_web"] }),
+      candidate({ address: null, phone: null, domain: null, corporateNumber: null, sources: ["web_search"] }),
+    ];
+    for (const c of cases) {
+      for (const ev of [{}, { websiteText: SITE_TEXT, websiteTitle: c.name, officialSiteConfidence: 100 }]) {
+        const r = verifyCandidate(c, ev);
+        expect(r.score).toBeGreaterThanOrEqual(0);
+        expect(r.score).toBeLessThanOrEqual(100);
+        expect(Number.isInteger(r.score)).toBe(true);
+      }
+    }
   });
 
   it("シグナルの内訳を必ず返す（判断根拠を UI に出せる）", () => {

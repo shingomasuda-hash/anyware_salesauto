@@ -69,9 +69,11 @@ export function DiscoveryProgress({ runId, initial }: { runId: string; initial: 
 
   const run = p.run;
   const target = run.requested_count;
+  // 「新規候補」は重複（既に登録済みの企業）を除いた件数。duplicate は別軸なので足さない
+  const discovered = p.counts.discovered + p.counts.verifying + p.counts.verified + p.counts.needs_review + p.counts.rejected + p.counts.failed;
   const pct = target > 0 ? Math.min(100, Math.round((run.promoted_count / target) * 100)) : 0;
   const verifyTotal = p.counts.verified + p.counts.needs_review + p.counts.rejected + p.counts.failed;
-  const verifyPct = run.discovered_count > 0 ? Math.min(100, Math.round((verifyTotal / run.discovered_count) * 100)) : 0;
+  const verifyPct = discovered > 0 ? Math.min(100, Math.round((verifyTotal / discovered) * 100)) : 0;
   const stats = Object.entries(p.providerStats) as [DiscoveryProviderName, ProviderStat][];
 
   return (
@@ -112,13 +114,21 @@ export function DiscoveryProgress({ runId, initial }: { runId: string; initial: 
         </div>
       </div>
 
-      <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-        <Stat label="発見" value={run.discovered_count} hint="重複排除後の候補数" />
+      <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <Stat label="新規候補" value={discovered} hint="重複を除いた発見数" />
         <Stat label="確認済" value={p.counts.verified} hint="本人確認を通過" />
         <Stat label="要確認" value={p.counts.needs_review} hint="人の判断待ち" />
         <Stat label="対象外" value={p.counts.rejected} hint="条件・確認不足" />
-        <Stat label="重複" value={p.counts.duplicate} hint="登録済み企業" />
-        <Stat label="登録" value={run.promoted_count} hint={`目標 ${target}社`} />
+      </div>
+      <p className="mt-2 text-[11px] text-muted-foreground">
+        新規候補 {discovered}件 ＝ 確認済 {p.counts.verified} ＋ 要確認 {p.counts.needs_review} ＋ 対象外 {p.counts.rejected}
+        {p.counts.failed > 0 ? ` ＋ 失敗 ${p.counts.failed}` : ""}
+        {p.counts.discovered + p.counts.verifying > 0 ? ` ＋ 確認中 ${p.counts.discovered + p.counts.verifying}` : ""}
+      </p>
+
+      <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <Stat label="重複（別集計）" value={p.counts.duplicate} hint="既に登録済み。新規候補に含みません" />
+        <Stat label="登録" value={p.run.promoted_count} hint={`確認済のうち企業登録 / 目標 ${target}社`} />
       </div>
 
       <div className="mt-5 space-y-3">
@@ -126,7 +136,7 @@ export function DiscoveryProgress({ runId, initial }: { runId: string; initial: 
           <div className="mb-1 flex justify-between text-xs text-muted-foreground">
             <span>本人確認</span>
             <span className="tabular-nums">
-              {verifyTotal} / {run.discovered_count}件
+              {verifyTotal} / {discovered}件
             </span>
           </div>
           <Progress value={verifyPct} />

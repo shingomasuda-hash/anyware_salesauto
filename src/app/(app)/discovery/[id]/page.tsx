@@ -19,6 +19,7 @@ export default async function DiscoveryRunPage({ params }: { params: Promise<{ i
   if (!progress) notFound();
   const candidates = await listCandidatesByRun(db, id, undefined, 300);
   const criteria = parseStoredCriteria(progress.run.criteria);
+  const duplicateCount = candidates.filter((c) => c.status === "duplicate").length;
 
   return (
     <div className="max-w-6xl">
@@ -34,8 +35,11 @@ export default async function DiscoveryRunPage({ params }: { params: Promise<{ i
       />
       <DiscoveryProgress runId={id} initial={progress} />
 
-      <h2 className="mt-8 mb-2 text-sm font-semibold">発見した企業候補（{candidates.length}）</h2>
+      <h2 className="mt-8 mb-2 text-sm font-semibold">
+        発見した企業候補（全{candidates.length}件：新規{candidates.length - duplicateCount}件 ＋ 重複{duplicateCount}件）
+      </h2>
       <p className="mb-2 text-xs text-muted-foreground">
+        「重複」は既に企業一覧へ登録済みのため、上の進捗にある新規候補数には含めていません。
         本人確認を通過した候補だけが企業として登録されます。要確認の候補は
         <Link href="/review" className="mx-1 underline">
           確認待ちリスト

@@ -1,6 +1,6 @@
 import type { Db } from "@/db";
 import type { DiscoveryCandidateRow } from "@/db/types";
-import { getDiscoveryRun, updateCandidate, updateDiscoveryRun } from "@/db/repositories/discovery";
+import { getDiscoveryRun, refreshDiscoveryRunCounts, updateCandidate, updateDiscoveryRun } from "@/db/repositories/discovery";
 import type { Logger } from "@/lib/logging/logger";
 import { promoteCandidate, type PromoteResult } from "./promote";
 
@@ -27,6 +27,8 @@ export async function approveCandidate(
     reviewed_by: options.reviewedBy ?? null,
     reviewed_at: new Date().toISOString(),
   });
+  // 手動レビューで候補の状態が変わるため、探索ランの集計を実データから引き直す
+  if (candidate.run_id) await refreshDiscoveryRunCounts(db, candidate.run_id);
   await logger.info("候補を手動で承認", { candidate: candidate.name, companyId: result.companyId });
   return result;
 }
@@ -39,6 +41,7 @@ export async function rejectCandidate(db: Db, candidate: DiscoveryCandidateRow, 
     reviewed_by: reviewedBy ?? null,
     reviewed_at: new Date().toISOString(),
   });
+  if (candidate.run_id) await refreshDiscoveryRunCounts(db, candidate.run_id);
 }
 
 /**
@@ -57,6 +60,7 @@ export async function correctCandidateWebsite(db: Db, candidate: DiscoveryCandid
     reviewed_at: new Date().toISOString(),
   });
   if (!candidate.run_id) return;
+  await refreshDiscoveryRunCounts(db, candidate.run_id);
   const run = await getDiscoveryRun(db, candidate.run_id);
   if (!run || run.status === "running") return;
   await updateDiscoveryRun(db, candidate.run_id, { status: "pending", phase: "verifying", locked_at: null, completed_at: null, attempts: 0 });
