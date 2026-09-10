@@ -30,15 +30,20 @@ export const gbizHojinSchema = z
 
 export type GbizHojin = z.infer<typeof gbizHojinSchema>;
 
+/**
+ * 検索レスポンス。
+ * GビズINFO は正常応答でも id / errors を null で返すことがあるため、
+ * 全項目を nullable にして「解析できない」と誤判定しないようにする。
+ */
 export const gbizSearchResponseSchema = z
   .object({
-    id: z.string().optional(),
-    message: z.string().optional(),
-    totalCount: z.union([z.number(), z.string()]).optional(),
-    totalPage: z.union([z.number(), z.string()]).optional(),
-    pageNumber: z.union([z.number(), z.string()]).optional(),
-    "hojin-infos": z.array(gbizHojinSchema).optional(),
-    errors: z.array(z.unknown()).optional(),
+    id: z.string().nullable().optional(),
+    message: z.string().nullable().optional(),
+    totalCount: z.union([z.number(), z.string()]).nullable().optional(),
+    totalPage: z.union([z.number(), z.string()]).nullable().optional(),
+    pageNumber: z.union([z.number(), z.string()]).nullable().optional(),
+    "hojin-infos": z.array(gbizHojinSchema).nullable().optional(),
+    errors: z.array(z.unknown()).nullable().optional(),
   })
   .passthrough();
 

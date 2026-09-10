@@ -45,7 +45,11 @@ export class GbizClient implements GbizProvider {
     // 取得後に mapping.ts の matchesIndustry でローカルフィルタする。
     const json = await this.request("", params);
     const parsed = gbizSearchResponseSchema.safeParse(json);
-    if (!parsed.success) throw new Error(`GビズINFO レスポンス形式が不正: ${parsed.error.message}`);
+    if (!parsed.success) {
+      // 想定外の形でも、どの項目が合わなかったかだけを簡潔に出す（レスポンス本文は出さない）
+      const where = parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).slice(0, 3).join(" / ");
+      throw new Error(`GビズINFO レスポンス形式が不正: ${where}`);
+    }
     const data = parsed.data;
     if (data.errors && data.errors.length > 0) {
       throw new Error(`GビズINFO API エラー: ${JSON.stringify(data.errors).slice(0, 300)}`);

@@ -182,12 +182,37 @@ function checkDiscoveryConfig() {
   console.log(`   ℹ️ 1回の探索の上限: Provider ${cfg.budget.maxProviderRequests}回 / 候補 ${cfg.budget.maxCandidates}件 / 確認 ${cfg.budget.maxVerificationRequests}回 / ${cfg.budget.maxExecutionMinutes}分`);
 }
 
+/**
+ * クローラーが外部サイトへ到達できるかを確認する。
+ * 1 サイトだけで判定すると、そのサイトが Bot を弾いているだけの場合に
+ * 「クロールできない」と誤判定するため、複数サイトで確認する。
+ */
 async function checkCrawlerEgress() {
-  try {
-    const res = await fetch("https://www.meti.go.jp/robots.txt", { signal: AbortSignal.timeout(15_000), headers: { "User-Agent": getEnv().CRAWL_USER_AGENT } });
-    record("外部サイトへの到達性", res.ok ? "OK" : "NG", `HTTP ${res.status}（クローラーが企業サイトに接続できるか）`);
-  } catch (err) {
-    record("外部サイトへの到達性", "NG", `${safe(err)}（クロールできません。ネットワーク/プロキシを確認）`);
+  const targets = ["https://www.example.com/", "https://www.iij.ad.jp/robots.txt", "https://www.meti.go.jp/robots.txt"];
+  const ua = getEnv().CRAWL_USER_AGENT;
+  const results: { host: string; detail: string; ok: boolean }[] = [];
+
+  for (const url of targets) {
+    const host = new URL(url).host;
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(15_000), headers: { "User-Agent": ua } });
+      results.push({ host, detail: `HTTP ${res.status}`, ok: res.ok });
+    } catch (err) {
+      results.push({ host, detail: safe(err), ok: false });
+    }
+  }
+
+  const reachable = results.filter((r) => r.ok);
+  if (reachable.length > 0) {
+    record("外部サイトへの到達性", "OK", `${reachable.length}/${results.length} サイトに接続できました`);
+    const blocked = results.filter((r) => !r.ok);
+    if (blocked.length > 0) {
+      console.log(`   ℹ️ 接続できなかったサイト: ${blocked.map((b) => `${b.host} (${b.detail})`).join(", ")}`);
+      console.log("   ℹ️ 一部サイトが Bot を拒否するのは正常です。全滅でなければクロールは可能です");
+    }
+  } else {
+    record("外部サイトへの到達性", "NG", `全 ${results.length} サイトに接続できません: ${results.map((r) => `${r.host}=${r.detail}`).join(", ")}`);
+    console.log("   ℹ️ ネットワーク / プロキシ / VPN の設定を確認してください");
   }
 }
 

@@ -41,6 +41,39 @@ describe("gbiz mapping", () => {
   });
 });
 
+describe("gbizSearchResponseSchema", () => {
+  // 実際の GビズINFO は正常応答でも id / errors を null で返す。
+  // これを「形式不正」と誤判定して検索全体を失敗させないこと。
+  it("正常応答の id / errors が null でも解析できる", () => {
+    const parsed = gbizSearchResponseSchema.safeParse({
+      id: null,
+      message: null,
+      errors: null,
+      totalCount: 120,
+      totalPage: 3,
+      pageNumber: 1,
+      "hojin-infos": [{ corporate_number: "1234567890123", name: "株式会社テスト", location: "大阪府大阪市中央区1-1" }],
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data["hojin-infos"]).toHaveLength(1);
+      expect(parsed.data.errors ?? []).toEqual([]);
+    }
+  });
+
+  it("hojin-infos が null でも解析でき、0件として扱える", () => {
+    const parsed = gbizSearchResponseSchema.safeParse({ id: null, errors: null, totalCount: 0, "hojin-infos": null });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data["hojin-infos"] ?? []).toEqual([]);
+  });
+
+  it("エラー応答は errors 配列として受け取れる", () => {
+    const parsed = gbizSearchResponseSchema.safeParse({ id: null, errors: [{ error_code: "401", message: "Unauthorized" }] });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.errors).toHaveLength(1);
+  });
+});
+
 describe("MockGbizProvider", () => {
   it("is deterministic and paginates", async () => {
     const p = new MockGbizProvider();
