@@ -1,6 +1,6 @@
 import { getCrawlerConfig } from "@/lib/config/crawler";
 import { extractDomain, normalizeUrl } from "@/lib/companies/normalize";
-import { decideOfficialSite, isNonOfficialDomain, type OfficialSiteCandidate } from "@/lib/companies/official-site";
+import { decideOfficialSite, isNonHtmlUrl, isNonOfficialDomain, looksLikeCorporateDatabaseUrl, type OfficialSiteCandidate } from "@/lib/companies/official-site";
 import { extractHtml } from "@/lib/crawler/extract";
 import { fetchHtml } from "@/lib/integrations/http/fetch";
 import { toCandidate } from "../normalizer";
@@ -82,7 +82,11 @@ export class OfficialWebProvider implements CompanyDiscoveryProvider {
           results
             .map((r) => normalizeUrl(r.url))
             .filter((u): u is string => Boolean(u))
-            .filter((u) => !isNonOfficialDomain(extractDomain(u))),
+            .filter((u) => !isNonOfficialDomain(extractDomain(u)))
+            // PDF・表計算などは公式サイトの本文として読めない
+            .filter((u) => !isNonHtmlUrl(u))
+            // 法人番号をパスに含む URL は法人情報データベース
+            .filter((u) => !looksLikeCorporateDatabaseUrl(u)),
         ),
       );
     } catch (err) {
@@ -100,7 +104,8 @@ export class OfficialWebProvider implements CompanyDiscoveryProvider {
         candidate.observations
           .map((o) => normalizeUrl(o.website))
           .filter((u): u is string => Boolean(u))
-          .filter((u) => !isNonOfficialDomain(extractDomain(u))),
+          .filter((u) => !isNonOfficialDomain(extractDomain(u)))
+          .filter((u) => !isNonHtmlUrl(u)),
       ),
     );
 

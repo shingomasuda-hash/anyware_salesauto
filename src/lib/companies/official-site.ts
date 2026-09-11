@@ -20,7 +20,26 @@ export const NON_OFFICIAL_DOMAINS: string[] = [
   "houjinbase.com", "houjin.goo.to", "goo.to", "fumadata.com", "j-lic.com", "mono-web.jp",
   "yao-mono.jp", "houjin-navi.com", "corporate-number.com", "nta.go.jp", "gbiz.go.jp",
   "baseconnect.jp", "sansan.com", "eight.evercam.jp", "meti-mono.jp",
+  // 50社検証で公式サイト候補に現れたディレクトリ・地図・プレスリリースサイト
+  "goo.ne.jp", "townpage.goo.ne.jp", "map.goo.ne.jp", "buzip.net", "e-shops.jp",
+  "bigcompany.jp", "jpubb.com", "i-o-m.jp", "bsj.jp", "ekiten.jp", "mapfan.com",
+  "its-mo.com", "navitime.com", "loco.yahoo.co.jp", "tel-search.jp",
 ];
+
+/** 公式サイトの本文として読めないファイル（PDF・表計算・書庫など） */
+const NON_HTML_EXTENSIONS = /\.(pdf|xlsx?|docx?|pptx?|csv|zip|rar|7z|tar|gz|jpe?g|png|gif|svg|webp|mp4|mp3)(\?|#|$)/i;
+
+/** 取得しても本文を読めない URL か（HTML 以外のファイル） */
+export function isNonHtmlUrl(url: string | null): boolean {
+  if (!url) return true;
+  return NON_HTML_EXTENSIONS.test(url);
+}
+
+/** 法人番号（13桁）をパスに含む URL は法人情報データベースとみなす */
+export function looksLikeCorporateDatabaseUrl(url: string | null): boolean {
+  if (!url) return false;
+  return /\/\d{13}(\/|\?|#|$)/.test(url) || /(houjin|hojin|corporate[-_]?number|corpnumber)/i.test(url);
+}
 
 /** 自治体・官公庁のドメイン（公式サイト候補にしない） */
 const GOVERNMENT_DOMAIN_PATTERNS = [/\.lg\.jp$/, /\.go\.jp$/, /(^|\.)city\.[^.]+\.jp$/, /(^|\.)pref\.[^.]+\.jp$/];

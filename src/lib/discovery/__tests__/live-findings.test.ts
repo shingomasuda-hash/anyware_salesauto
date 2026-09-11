@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { cleanCompanyName, isPlausibleCompany, toCandidate } from "../normalizer";
 import { isPublicEntity, matchesConditions } from "@/lib/integrations/gbiz/mapping";
-import { isNonOfficialDomain } from "@/lib/companies/official-site";
+import { isNonHtmlUrl, isNonOfficialDomain, looksLikeCorporateDatabaseUrl } from "@/lib/companies/official-site";
 import type { GbizHojin } from "@/lib/integrations/gbiz/types";
 
 function candidate(name: string) {
@@ -137,5 +137,34 @@ describe("3回目の実データ検証で判明した公式サイトの誤マッ
     for (const d of ["www.asahi-chem.co.jp", "kinoshita-kogyo.co.jp", "hamadakagu.jp", "nakata-ss.co.jp"]) {
       expect([d, isNonOfficialDomain(d)]).toEqual([d, false]);
     }
+  });
+});
+
+describe("50社検証で判明した公式サイト候補のノイズ", () => {
+  it("ディレクトリ・地図・プレスリリースサイトを除外する", () => {
+    const blocked = [
+      "townpage.goo.ne.jp", "map.goo.ne.jp", "buzip.net", "el.e-shops.jp",
+      "www.bigcompany.jp", "machi.jpubb.com", "www.i-o-m.jp", "bso16241.bsj.jp",
+    ];
+    for (const d of blocked) expect([d, isNonOfficialDomain(d)]).toEqual([d, true]);
+  });
+
+  it("PDF・表計算などHTML以外は公式サイト候補にしない", () => {
+    const files = [
+      "https://www.np.nipro-pharma.co.jp/pdf/nipropharma_corporate_profile.pdf",
+      "https://www.jtccm.or.jp/sites/default/files/JIS/ISO_list_0.xlsx",
+      "https://example.co.jp/catalog.docx",
+      "https://example.co.jp/logo.png",
+    ];
+    for (const u of files) expect([u, isNonHtmlUrl(u)]).toEqual([u, true]);
+    for (const u of ["https://example.co.jp/", "https://example.co.jp/company/outline.html"]) {
+      expect([u, isNonHtmlUrl(u)]).toEqual([u, false]);
+    }
+  });
+
+  it("法人番号をパスに含むURLは法人情報データベースとみなす", () => {
+    expect(looksLikeCorporateDatabaseUrl("https://xn--zcklx7evic7044c1qeqrozh7c.com/companies/1120001021305")).toBe(true);
+    expect(looksLikeCorporateDatabaseUrl("https://houjin.example.com/1234567890123/")).toBe(true);
+    expect(looksLikeCorporateDatabaseUrl("https://yamada-ss.co.jp/company/")).toBe(false);
   });
 });
