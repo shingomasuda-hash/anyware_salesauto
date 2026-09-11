@@ -72,3 +72,18 @@ describe("toCompanySource", () => {
     expect(toCompanySource("official_web")).toBe("import");
   });
 });
+
+describe("rowToMerged の情報源ID", () => {
+  it("観測が残っていない行でも法人番号を情報源IDにする", () => {
+    // ここが null だと company_sources の external_id が NULL になり、
+    // ユニークインデックスが効かず再探索のたびに行が増える
+    const merged = rowToMerged(row({ raw_data: {} as Json }));
+    expect(merged.observations).toHaveLength(1);
+    expect(merged.observations[0].sourceId).toBe("1234567890123");
+  });
+
+  it("法人番号が無ければドメインを使う", () => {
+    const merged = rowToMerged(row({ raw_data: {} as Json, corporate_number: null }));
+    expect(merged.observations[0].sourceId).toBe("yamada.co.jp");
+  });
+});

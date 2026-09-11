@@ -13,6 +13,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:dedupe-sources": "tsx scripts/dedupe-company-sources.ts",
+    "db:repair-candidates": "tsx scripts/repair-candidates.ts",
     "db:studio": "drizzle-kit studio",
     "db:check": "drizzle-kit check",
     "seed": "tsx scripts/seed.ts",

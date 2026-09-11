@@ -574,6 +574,7 @@ npm run ai:cost -- --project 50   # 実績平均から50社分の費用を予測
 npm run env:check          # Live 実行に必要な環境変数の充足チェック（値は表示しません）
 npm run discovery:verify   # 直近の探索ランを検証（企業ごとの結果・精度指標・Provider別貢献・安全検査）
 npm run db:dedupe-sources  # company_sources の重複行を掃除（--apply で削除 / --inspect で中身を確認）
+npm run db:repair-candidates # 企業登録済みなのに failed のままの候補を verified に戻す（--apply）
 npm run jobs:run -- --drain  # キューに残ったクロール・AI分析を処理しきってから終了
 npm run discovery:verify -- --run <run-id>
 ```

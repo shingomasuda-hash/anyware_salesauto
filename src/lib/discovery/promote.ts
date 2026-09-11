@@ -55,7 +55,17 @@ export async function promoteCandidate(db: Db, row: DiscoveryCandidateRow, optio
   );
 
   await updateCandidate(db, row.id, { company_id: reg.company.id, website: websiteUrl });
-  await saveCompanySources(db, reg.company.id, { ...row, website: websiteUrl });
+  // 出所の記録に失敗しても昇格自体は止めない。
+  // ここで throw すると「企業は登録済みなのに候補は失敗扱い」という食い違った状態が残る。
+  try {
+    await saveCompanySources(db, reg.company.id, { ...row, website: websiteUrl });
+  } catch (err) {
+    await logger.warn("情報源の記録に失敗（企業登録は完了）", {
+      company: row.name,
+      companyId: reg.company.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   // Full Crawl は「本人確認済み かつ 公式サイトあり」のみ。
   // 採用活動が条件のとき、採用の痕跡が無い企業には無駄なアクセスをしない。

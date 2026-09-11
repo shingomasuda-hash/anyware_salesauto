@@ -222,18 +222,16 @@ export async function insertCompanySources(db: Db, rows: CompanySourceInsert[]):
  */
 export async function replaceCompanySources(db: Db, companyId: string, rows: CompanySourceInsert[]): Promise<void> {
   if (rows.length === 0) return;
-  const keys = rows.map(
-    (r) => sql`(${r.provider}, ${r.external_id ?? ""}, ${r.source_url ?? ""}, ${r.source_type ?? ""})`,
+  // 列ごとに比較する（行コンストラクタ (a,b,c) in ((..)) はパラメータの型が決まらず失敗する）
+  const sameObservation = rows.map((r) =>
+    and(
+      eq(companySources.provider, r.provider),
+      sql`coalesce(${companySources.external_id}, '') = ${r.external_id ?? ""}`,
+      sql`coalesce(${companySources.source_url}, '') = ${r.source_url ?? ""}`,
+      sql`coalesce(${companySources.source_type}, '') = ${r.source_type ?? ""}`,
+    )!,
   );
-  await db.execute(sql`
-    delete from ${companySources}
-    where ${companySources.company_id} = ${companyId}
-      and (
-        ${companySources.provider},
-        coalesce(${companySources.external_id}, ''),
-        coalesce(${companySources.source_url}, ''),
-        coalesce(${companySources.source_type}, '')
-      ) in (${sql.join(keys, sql`, `)})`);
+  await db.delete(companySources).where(and(eq(companySources.company_id, companyId), or(...sameObservation)));
   await db.insert(companySources).values(rows);
 }
 
