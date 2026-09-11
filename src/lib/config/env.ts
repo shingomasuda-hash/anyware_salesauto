@@ -35,8 +35,12 @@ const envSchema = z.object({
   AI_MONTHLY_BUDGET_JPY: z.coerce.number().int().nonnegative().default(10_000),
   /** 費用表示・予算判定に使う為替レート（1 USD = N 円） */
   AI_USD_JPY_RATE: z.coerce.number().positive().default(155),
-  /** 採用ページを確認できた企業だけ AI 分析する（費用の大半はここで決まる） */
-  ANALYSIS_REQUIRE_RECRUIT_PAGE: z
+  /**
+   * 採用・求人の痕跡がある企業だけ AI 分析する（費用の大半はここで決まる）。
+   * 「採用ページがある企業だけ」ではない。公式サイトに採用ページが無い企業も
+   * 求人媒体を使っていれば営業ターゲットになるため。
+   */
+  ANALYSIS_REQUIRE_RECRUIT_SIGNAL: z
     .enum(["true", "false"])
     .default("true")
     .transform((v) => v === "true"),

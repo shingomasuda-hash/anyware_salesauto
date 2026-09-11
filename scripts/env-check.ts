@@ -49,9 +49,9 @@ const SPECS: Spec[] = [
     fallback: "未設定でも既定の 10000円 で動作します",
   },
   {
-    name: "ANALYSIS_REQUIRE_RECRUIT_PAGE",
+    name: "ANALYSIS_REQUIRE_RECRUIT_SIGNAL",
     need: "recommended",
-    purpose: "採用ページのある企業だけAI分析する（費用の大半を決める）",
+    purpose: "採用・求人の痕跡がある企業だけAI分析する（費用の大半を決める）",
     expected: "true",
     showValue: true,
     fallback: "未設定でも既定の true で動作します",

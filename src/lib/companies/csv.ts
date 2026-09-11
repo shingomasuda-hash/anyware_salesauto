@@ -1,5 +1,6 @@
 import type { CompanyOverviewRow } from "@/db/types";
 import { employeeRangeLabel, industryLabel } from "./constants";
+import { RECRUIT_TARGET_LABELS } from "./recruit-target";
 
 const COLUMNS: { header: string; value: (r: CompanyOverviewRow) => string | number | null | undefined }[] = [
   { header: "企業名", value: (r) => r.company_name },
@@ -20,6 +21,8 @@ const COLUMNS: { header: string; value: (r: CompanyOverviewRow) => string | numb
   { header: "新卒採用", value: (r) => r.new_graduate_hiring },
   { header: "中途採用", value: (r) => r.mid_career_hiring },
   { header: "採用ページ", value: (r) => r.recruit_page_url },
+  { header: "採用状況区分", value: (r) => (r.recruit_target ? RECRUIT_TARGET_LABELS[r.recruit_target] : null) },
+  { header: "求人媒体", value: (r) => (Array.isArray(r.job_boards) ? (r.job_boards as string[]).join(" / ") : null) },
   { header: "Instagram", value: (r) => r.instagram_url },
   { header: "Facebook", value: (r) => r.facebook_url },
   { header: "X", value: (r) => r.x_url },

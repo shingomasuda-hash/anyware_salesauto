@@ -61,6 +61,10 @@ export const companies = pgTable(
     contact_page_url: text("contact_page_url"),
     contact_form_url: text("contact_form_url"),
     recruit_page_url: text("recruit_page_url"),
+    // 営業ターゲットとしての採用状況（クロールで機械的に判定。AIは使わない）
+    recruit_target: text("recruit_target").$type<RecruitTarget>(),
+    recruit_target_reasons: jsonArray("recruit_target_reasons"),
+    job_boards: jsonArray("job_boards"),
     instagram_url: text("instagram_url"),
     facebook_url: text("facebook_url"),
     x_url: text("x_url"),
@@ -608,6 +612,8 @@ export const companyOverview = pgView("company_overview", {
   contact_page_url: text("contact_page_url"),
   contact_form_url: text("contact_form_url"),
   recruit_page_url: text("recruit_page_url"),
+  recruit_target: text("recruit_target").$type<RecruitTarget>(),
+  job_boards: jsonArray("job_boards"),
   instagram_url: text("instagram_url"),
   facebook_url: text("facebook_url"),
   x_url: text("x_url"),
@@ -670,4 +676,6 @@ export type DiscoveryRunStatus = "pending" | "running" | "completed" | "partiall
 export type DiscoveryPhase = "discovering" | "verifying" | "promoting" | "done";
 export type DiscoveryCandidateStatus = "discovered" | "verifying" | "verified" | "needs_review" | "duplicate" | "rejected" | "failed";
 export type RecruitingSignal = "yes" | "no" | "unknown";
+/** 営業ターゲットとしての採用状況（src/lib/companies/recruit-target.ts で判定） */
+export type RecruitTarget = "no_recruit_page" | "weak_recruit_page" | "active_recruit" | "no_signal";
 export type CompanySourceType = "discovery" | "verification" | "enrichment" | "crawl";

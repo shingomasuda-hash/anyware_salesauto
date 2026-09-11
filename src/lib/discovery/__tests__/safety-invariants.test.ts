@@ -88,13 +88,19 @@ describe("営業拒否が unknown の企業を営業可能として扱わない"
   it("営業対象の絞り込みは sales_contact_allowed='true' のみを通す", () => {
     const parts = describeSql(buildCompanyWhere(parseCompanyFilters({ excludeRestricted: "on" })));
     expect(parts).toContain("sales_contact_allowed");
-    // 'true' に限定していること。'false' を除くだけの条件（<>）では unknown が通ってしまう
+    // 'true' に限定していること。'false' を除くだけの条件では unknown が通ってしまう
+    expect(parts).toContain("=");
     expect(parts).toContain("true");
-    expect(parts).not.toContain("<>");
   });
 
-  it("絞り込みを使わない場合は unknown も一覧に出る（存在は隠さない）", () => {
-    expect(describeSql(buildCompanyWhere(parseCompanyFilters({})))).not.toContain("sales_contact_allowed");
+  it("既定では営業不可だけを除き、unknown は一覧に残す", () => {
+    // 営業を断っている企業はリストに出さない。
+    // 一方 unknown は「確認できていない」だけなので、隠さずに人が判断できるようにする。
+    const parts = describeSql(buildCompanyWhere(parseCompanyFilters({})));
+    expect(parts).toContain("sales_contact_allowed");
+    expect(parts).toContain("<>");
+    expect(parts).toContain("false");
+    expect(parts).not.toContain("true");
   });
 
   it("問い合わせ系ページを確認できていなければ unknown（true と断定しない）", () => {

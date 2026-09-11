@@ -25,7 +25,9 @@ export default async function CompaniesPage({ searchParams }: { searchParams: Pr
       <PageHeader
         title="企業一覧"
         description={[
-          filters.includeNoRecruitPage ? "採用ページなしを含む全企業" : "採用ページを確認できた企業のみ",
+          filters.includeNoRecruitSignal ? "採用の痕跡なしを含む" : "採用の痕跡がある企業のみ",
+          filters.includeUnverifiedSite ? "公式HP未確認を含む" : "公式サイトを確認できた企業のみ",
+          filters.includeRestricted ? "営業不可も含む" : "営業不可は除外",
           filters.includeLowConfidence ? "確度が低い企業も含む" : `AIが判断しきれなかった企業（確度${MIN_ANALYSIS_CONFIDENCE}未満）は除外`,
           "企業名をクリックすると公式サイトが開きます。フィルタ条件はそのまま CSV 出力に適用されます。",
         ].join(" / ")}

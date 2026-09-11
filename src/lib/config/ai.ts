@@ -15,8 +15,8 @@ export function getAiConfig() {
      * 構造化出力を使っている以上スキーマ違反は稀なので 1 回に留める。
      */
     maxParseRetries: 1,
-    /** 採用ページを確認できた企業だけ分析するか */
-    requireRecruitPage: env.ANALYSIS_REQUIRE_RECRUIT_PAGE,
+    /** 採用・求人の痕跡がある企業だけ分析するか */
+    requireRecruitSignal: env.ANALYSIS_REQUIRE_RECRUIT_SIGNAL,
     /** 当月の費用上限（円）。0 以下で上限なし */
     monthlyBudgetJpy: env.AI_MONTHLY_BUDGET_JPY,
   } as const;

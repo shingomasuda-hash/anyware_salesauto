@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/select";
 import { EMPLOYEE_RANGES, INDUSTRIES, PREFECTURE_NAMES, SALES_RANKS } from "@/lib/companies/constants";
+import { RECRUIT_TARGET_OPTIONS } from "@/lib/companies/recruit-target";
 import { SORT_OPTIONS, type CompanyFilters } from "@/lib/companies/filters";
 
 function Check({ name, label, checked }: { name: string; label: string; checked: boolean }) {
@@ -27,6 +28,14 @@ export function CompanyFilterForm({ filters }: { filters: CompanyFilters }) {
           {PREFECTURE_NAMES.map((p) => (
             <option key={p} value={p}>
               {p}
+            </option>
+          ))}
+        </NativeSelect>
+        <NativeSelect name="recruitTarget" defaultValue={filters.recruitTarget ?? ""}>
+          <option value="">採用状況（すべて）</option>
+          {RECRUIT_TARGET_OPTIONS.filter((o) => o.key !== "no_signal").map((o) => (
+            <option key={o.key} value={o.key}>
+              {o.label}
             </option>
           ))}
         </NativeSelect>
@@ -74,14 +83,16 @@ export function CompanyFilterForm({ filters }: { filters: CompanyFilters }) {
         </NativeSelect>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-        {/* 既定は「採用ページあり」のみ。全件を見たいときだけ外す */}
-        <Check name="includeNoRecruitPage" label="採用ページなしも表示" checked={filters.includeNoRecruitPage} />
+        {/* 既定は「採用の痕跡がある企業」のみ。採用ページの有無では絞らない */}
+        <Check name="includeNoRecruitSignal" label="採用の痕跡なしも表示" checked={filters.includeNoRecruitSignal} />
         <Check name="recruiting" label="採用中（AI判定）" checked={filters.recruiting} />
         <Check name="hasWebsite" label="公式HPあり" checked={filters.hasWebsite} />
         <Check name="hasContact" label="問い合わせ先あり" checked={filters.hasContact} />
         <Check name="hasEmail" label="メールアドレスあり" checked={filters.hasEmail} />
         <Check name="hasOutreach" label="文面あり" checked={filters.hasOutreach} />
         <Check name="includeLowConfidence" label="確度が低い企業も表示" checked={filters.includeLowConfidence} />
+        <Check name="includeRestricted" label="営業不可も表示" checked={filters.includeRestricted} />
+        <Check name="includeUnverifiedSite" label="公式HP未確認も表示" checked={filters.includeUnverifiedSite} />
         <Check name="excludeRestricted" label="営業可のみ（拒否・未確認を除外）" checked={filters.excludeRestricted} />
         <Check name="unanalyzed" label="未解析" checked={filters.unanalyzed} />
         <Check name="needsReview" label="HP要確認" checked={filters.needsReview} />

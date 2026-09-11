@@ -3,6 +3,7 @@ import { FileText } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ContactAllowedBadge, RankBadge, ScoreCell, YesNo } from "./badges";
 import { employeeRangeLabel, industryLabel } from "@/lib/companies/constants";
+import { RECRUIT_TARGET_LABELS } from "@/lib/companies/recruit-target";
 import type { CompanyOverviewRow } from "@/db/types";
 import { formatDate } from "@/lib/utils/format";
 
@@ -17,7 +18,7 @@ export function CompanyTable({ rows }: { rows: CompanyOverviewRow[] }) {
             <TableHead>業種</TableHead>
             <TableHead>従業員規模</TableHead>
             <TableHead className="text-center">HP</TableHead>
-            <TableHead className="text-center">採用</TableHead>
+            <TableHead>採用状況</TableHead>
             <TableHead className="text-center">SNS</TableHead>
             <TableHead>採用課題</TableHead>
             <TableHead>Web</TableHead>
@@ -72,8 +73,8 @@ export function CompanyTable({ rows }: { rows: CompanyOverviewRow[] }) {
                 <TableCell className="text-center">
                   <YesNo value={r.has_website} />
                 </TableCell>
-                <TableCell className="text-center">
-                  <YesNo value={r.recruiting_status ? r.recruiting_status === "active" : r.has_recruit_page ? true : null} />
+                <TableCell className="whitespace-nowrap text-xs">
+                  {r.recruit_target ? RECRUIT_TARGET_LABELS[r.recruit_target] : "—"}
                 </TableCell>
                 <TableCell className="text-center">
                   <YesNo value={r.has_sns} />

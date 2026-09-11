@@ -28,30 +28,56 @@ function columnsIn(where: ReturnType<typeof buildCompanyWhere>): string[] {
   return found;
 }
 
-describe("採用ページのある企業のみ", () => {
-  it("既定で has_recruit_page 条件が入る（指定なしでも絞り込む）", () => {
-    expect(columnsIn(buildCompanyWhere(filters()))).toContain("has_recruit_page");
+describe("採用状況による絞り込み", () => {
+  // 営業ターゲットは「採用で困っていそう / 力を入れていそう /
+  // 採用はしているが公式サイトに採用ページが無い」企業。
+  // 採用ページの有無では絞らない（採用ページなしは主要ターゲットのひとつ）。
+  it("既定で採用の痕跡なし（no_signal）だけを除く", () => {
+    expect(columnsIn(buildCompanyWhere(filters()))).toContain("recruit_target");
   });
 
-  it("「採用ページなしも表示」を選んだときだけ条件が外れる", () => {
-    // 確度の条件は既定で常に入るため、採用ページの条件だけが消えることを見る
-    expect(columnsIn(buildCompanyWhere(filters({ includeNoRecruitPage: "1" })))).not.toContain("has_recruit_page");
+  it("採用ページの有無では絞らない", () => {
+    expect(columnsIn(buildCompanyWhere(filters()))).not.toContain("has_recruit_page");
   });
 
-  it("AI判定の recruiting とは別条件", () => {
-    const both = columnsIn(buildCompanyWhere(filters({ recruiting: "1" })));
-    expect(both).toContain("has_recruit_page");
-    expect(both).toContain("recruiting_status");
+  it("区分を指定するとその区分だけになる", () => {
+    expect(columnsIn(buildCompanyWhere(filters({ recruitTarget: "no_recruit_page" })))).toContain("recruit_target");
+  });
+
+  it("「採用の痕跡なしも表示」を選ぶと条件が外れる", () => {
+    const cols = columnsIn(buildCompanyWhere(filters({ includeNoRecruitSignal: "1", includeLowConfidence: "1", includeRestricted: "1", includeUnverifiedSite: "1" })));
+    expect(cols).not.toContain("recruit_target");
   });
 
   it("URL クエリを往復しても保持される", () => {
-    const on = parseCompanyFilters({ includeNoRecruitPage: "1" });
-    expect(on.includeNoRecruitPage).toBe(true);
-    expect(filtersToSearchParams(on).get("includeNoRecruitPage")).toBe("1");
+    const parsed = parseCompanyFilters({ recruitTarget: "weak_recruit_page" });
+    expect(parsed.recruitTarget).toBe("weak_recruit_page");
+    expect(filtersToSearchParams(parsed).get("recruitTarget")).toBe("weak_recruit_page");
+  });
+});
 
-    const off = parseCompanyFilters({});
-    expect(off.includeNoRecruitPage).toBe(false);
-    expect(filtersToSearchParams(off).get("includeNoRecruitPage")).toBeNull();
+describe("営業できない企業を出さない", () => {
+  it("既定で営業不可を除外する", () => {
+    expect(columnsIn(buildCompanyWhere(filters()))).toContain("sales_contact_allowed");
+  });
+
+  it("「営業不可も表示」を選んだときだけ出す", () => {
+    const cols = columnsIn(buildCompanyWhere(filters({ includeRestricted: "1", includeNoRecruitSignal: "1", includeLowConfidence: "1", includeUnverifiedSite: "1" })));
+    expect(cols).not.toContain("sales_contact_allowed");
+  });
+});
+
+describe("公式サイトを確認できた企業だけを出す", () => {
+  // 企業名のリンク先が公式サイトでない、という事故を防ぐ
+  it("既定で website_url と確認状態の条件が入る", () => {
+    const cols = columnsIn(buildCompanyWhere(filters()));
+    expect(cols).toContain("website_url");
+    expect(cols).toContain("verification_status");
+  });
+
+  it("「公式HP未確認も表示」を選んだときだけ外れる", () => {
+    const cols = columnsIn(buildCompanyWhere(filters({ includeUnverifiedSite: "1", includeNoRecruitSignal: "1", includeLowConfidence: "1", includeRestricted: "1" })));
+    expect(cols).not.toContain("verification_status");
   });
 });
 
@@ -81,8 +107,10 @@ describe("確度が低い企業を営業リストに出さない", () => {
     expect(cols).not.toContain("confidence_score");
   });
 
-  it("両方を外すと条件が無くなる（全件表示）", () => {
-    expect(buildCompanyWhere(filters({ includeNoRecruitPage: "1", includeLowConfidence: "1" }))).toBeUndefined();
+  it("既定の除外をすべて外すと条件が無くなる（全件表示）", () => {
+    expect(
+      buildCompanyWhere(filters({ includeNoRecruitSignal: "1", includeLowConfidence: "1", includeRestricted: "1", includeUnverifiedSite: "1" })),
+    ).toBeUndefined();
   });
 
   it("URL クエリを往復しても保持される", () => {

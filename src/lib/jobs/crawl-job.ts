@@ -15,6 +15,7 @@ import { fetchHtml } from "@/lib/integrations/http/fetch";
 import { getPlacesProvider } from "@/lib/integrations/google-places";
 import { Logger, serializeError } from "@/lib/logging/logger";
 import { shouldEnqueueAnalysis } from "@/lib/ai/gate";
+import { classifyRecruitTargetFromCrawl, type RecruitTargetResult } from "@/lib/companies/recruit-target";
 import { analysisPriorityFromCrawl } from "./analysis-priority";
 import { enqueueAnalysisJob } from "./enqueue";
 
@@ -89,7 +90,9 @@ export async function processCrawlJob(db: Db, job: CrawlJobRow, logger: Logger):
   await replaceCompanyPages(db, company.id, uniqueRows);
 
   // 4) 企業情報の更新（連絡先 / SNS / 営業拒否）
-  const update = buildCompanyUpdate(company, site, summary, now);
+  // 営業ターゲットとしての採用状況をクロール結果から判定する（AI を使わない）
+  const recruitTarget = classifyRecruitTargetFromCrawl(summary);
+  const update = buildCompanyUpdate(company, site, summary, now, recruitTarget);
   await updateCompany(db, company.id, update);
 
   if (update.sales_contact_allowed === "false") {
@@ -113,7 +116,7 @@ export async function processCrawlJob(db: Db, job: CrawlJobRow, logger: Logger):
   // 5) 分析ジョブ投入
   // 採用ページを確認できない企業には AI を使わない（営業リストの条件であり、費用の大半がここで決まる）
   if (job.enqueue_analysis) {
-    const gate = shouldEnqueueAnalysis(summary.recruitPageUrl);
+    const gate = shouldEnqueueAnalysis(recruitTarget.target);
     if (gate.ok) {
       // 月の AI 予算に上限があるため、見込みの高い企業から分析されるように順番をつける
       const priority = analysisPriorityFromCrawl(summary, update.email ?? null, update.phone ?? null);
@@ -219,7 +222,7 @@ async function resolveOfficialSite(db: Db, company: CompanyRow, logger: Logger):
   return { status: "verified", url: decision.best.url, domain, confidence: decision.best.confidence, best: decision.best, candidates: storedScored };
 }
 
-function buildCompanyUpdate(company: CompanyRow, site: ResolvedSite, summary: CrawlSummary, now: string): Partial<CompanyInsert> {
+function buildCompanyUpdate(company: CompanyRow, site: ResolvedSite, summary: CrawlSummary, now: string, recruitTarget: RecruitTargetResult): Partial<CompanyInsert> {
   const domain = site.domain ?? extractDomain(site.url);
   // サイト内に記載された公開アドレスのみ採用（推測生成はしない）。
   // 制作会社など無関係ドメインのメールは企業の連絡先として保存しない。
@@ -238,6 +241,10 @@ function buildCompanyUpdate(company: CompanyRow, site: ResolvedSite, summary: Cr
     contact_page_url: summary.contactPageUrl,
     contact_form_url: summary.contactFormUrl,
     recruit_page_url: summary.recruitPageUrl,
+    // 営業ターゲットとしての採用状況（AIではなくクロール結果から判定）
+    recruit_target: recruitTarget.target,
+    recruit_target_reasons: recruitTarget.reasons as unknown as Json,
+    job_boards: recruitTarget.jobBoards as unknown as Json,
     instagram_url: summary.social.instagram_url,
     facebook_url: summary.social.facebook_url,
     x_url: summary.social.x_url,

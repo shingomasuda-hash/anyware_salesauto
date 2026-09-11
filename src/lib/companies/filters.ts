@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, isNull, lte, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import { companyOverview } from "@/db/schema";
 import { MIN_ANALYSIS_CONFIDENCE } from "./constants";
 import type { OverviewQuery } from "@/db/repositories/companies";
@@ -34,12 +34,13 @@ export const companyFilterSchema = z.object({
   maxWeb: optionalNum,
   recruiting: flag,
   /**
-   * 採用ページを確認できなかった企業も表示する。
-   * 営業リストの既定は「採用ページのある企業のみ」なので、この明示チェックで初めて全件になる
-   * （既定 ON のチェックボックスにすると GET フォームで「外した」状態を表現できないため、
-   *   条件をゆるめる側をフラグにしている）。
+   * 採用・求人の記載が見つからない企業も表示する。
+   *
+   * 営業ターゲットは「採用で困っていそう / 力を入れていそう / 採用はしているが
+   * 公式サイトに採用ページが無い」企業。採用ページの有無では絞らない。
+   * 既定では「採用の痕跡なし（no_signal）」だけを除く。
    */
-  includeNoRecruitPage: flag,
+  includeNoRecruitSignal: flag,
   hasWebsite: flag,
   hasContact: flag,
   hasEmail: flag,
@@ -50,6 +51,12 @@ export const companyFilterSchema = z.object({
    * 既定では除外する。まだ分析していない企業は既定でも表示する。
    */
   includeLowConfidence: flag,
+  /** 営業を断っている企業も表示する。既定では除外する */
+  includeRestricted: flag,
+  /** 公式サイトを確認できていない企業も表示する。既定では除外する */
+  includeUnverifiedSite: flag,
+  /** 採用状況の区分（no_recruit_page / weak_recruit_page / active_recruit / no_signal） */
+  recruitTarget: optionalStr,
   excludeRestricted: flag,
   unanalyzed: flag,
   needsReview: flag,
@@ -101,10 +108,19 @@ export function buildCompanyWhere(f: CompanyFilters): SQL | undefined {
   if (f.minRecruitIssue !== undefined) c.push(gte(v.recruitment_issue_score, f.minRecruitIssue));
   if (f.maxSns !== undefined) c.push(lte(v.sns_activity_score, f.maxSns));
   if (f.maxWeb !== undefined) c.push(lte(v.web_quality_score, f.maxWeb));
+  // 営業を断っている企業は営業リストに出さない（明示的に指定したときだけ表示）
+  if (!f.includeRestricted) c.push(ne(v.sales_contact_allowed, "false"));
+  // 公式サイトを確認できた企業だけを出す。
+  // 企業名のリンク先が公式サイトでない、という事故を防ぐ。
+  if (!f.includeUnverifiedSite) {
+    c.push(and(isNotNull(v.website_url), inArray(v.verification_status, ["verified", "manual"]))!);
+  }
+  if (f.recruitTarget) c.push(eq(v.recruit_target, f.recruitTarget as "no_recruit_page" | "weak_recruit_page" | "active_recruit" | "no_signal"));
   if (f.recruiting) c.push(eq(v.recruiting_status, "active"));
-  // 営業リストの既定は「採用ページのある企業のみ」。
-  // 採用ページの有無はクロールで機械的に確認した事実であり、AI の判定ではない。
-  if (!f.includeNoRecruitPage) c.push(eq(v.has_recruit_page, true));
+  // 既定では「採用の痕跡なし」だけを除く。採用ページが無くても求人媒体を使っていれば
+  // 営業ターゲットになるため、採用ページの有無では絞らない。
+  // まだ判定していない企業（recruit_target が null）は残す。
+  if (!f.includeNoRecruitSignal) c.push(or(isNull(v.recruit_target), ne(v.recruit_target, "no_signal"))!);
   if (f.hasWebsite) c.push(eq(v.has_website, true));
   if (f.hasContact) c.push(eq(v.has_contact, true));
   if (f.hasEmail) c.push(eq(v.has_email, true));
@@ -114,8 +130,7 @@ export function buildCompanyWhere(f: CompanyFilters): SQL | undefined {
   if (!f.includeLowConfidence) {
     c.push(or(isNull(v.analysis_id), and(gte(v.confidence_score, MIN_ANALYSIS_CONFIDENCE), isNotNull(v.sales_priority_rank)))!);
   }
-  // 営業対象の絞り込みでは「不明（未確認）」も除外する。
-  // 営業拒否表記を確認できていない企業を、営業可能として扱わないため。
+  // さらに厳しく「営業可と確認できた企業だけ」に絞る（未確認も除外）
   if (f.excludeRestricted) c.push(eq(v.sales_contact_allowed, "true"));
   if (f.unanalyzed) c.push(isNull(v.analysis_id));
   if (f.needsReview) c.push(inArray(v.verification_status, ["needs_review", "unverified"]));

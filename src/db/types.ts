@@ -24,6 +24,7 @@ export type {
   DiscoveryPhase,
   DiscoveryCandidateStatus,
   RecruitingSignal,
+  RecruitTarget,
   CompanySourceType,
 } from "./schema";
 
