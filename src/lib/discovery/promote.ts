@@ -6,7 +6,7 @@ import type {
   DiscoveryProviderName,
   Json,
 } from "@/db/types";
-import { insertCompanySources, updateCandidate } from "@/db/repositories/discovery";
+import { replaceCompanySources, updateCandidate } from "@/db/repositories/discovery";
 import { registerCompany } from "@/lib/companies/register";
 import { enqueueCrawlJob } from "@/lib/jobs/enqueue";
 import type { Logger } from "@/lib/logging/logger";
@@ -101,8 +101,9 @@ export async function saveCompanySources(db: Db, companyId: string, row: Discove
       observed_data: { verificationScore: row.verification_score, signals: row.verification_signals } as unknown as Json,
     });
   }
-  // ON CONFLICT DO NOTHING は同一 INSERT 文の中の重複を弾かないため、ここで畳んでおく
-  await insertCompanySources(db, dedupeSourceRows(sources));
+  // ON CONFLICT DO NOTHING は同一 INSERT 文の中の重複を弾かないため、ここで畳んでおく。
+  // 同じ企業を再探索したときに行が増えないよう、同じ観測は置き換える。
+  await replaceCompanySources(db, companyId, dedupeSourceRows(sources));
 }
 
 /** (provider, external_id, source_url) が同じ行は confidence の高い 1 件だけ残す */
@@ -131,7 +132,10 @@ export function rowToMerged(row: DiscoveryCandidateRow): MergedCandidate {
     corporateNumber: row.corporate_number,
     industry: row.industry,
     source: row.primary_source,
-    sourceId: null,
+    // 観測が残っていない古い行でも情報源を特定できるようにする。
+    // ここが null だと company_sources の external_id が NULL になり、
+    // ユニークインデックスが効かず再探索のたびに行が増える。
+    sourceId: row.corporate_number ?? row.domain,
     sourceUrl: row.website,
     sourceConfidence: row.source_confidence,
     rawData: row.raw_data,

@@ -33,3 +33,23 @@ describe("matchDuplicate", () => {
     expect(m?.id).toBe("a");
   });
 });
+
+describe("既存企業への識別情報の書き戻し", () => {
+  // 名前+所在地で一致した既存企業に法人番号が無いまま放置すると、
+  // 次に同じ企業を GビズINFO で見つけても法人番号で重複と判定できず、
+  // 毎回「新しい企業」として検証・クロールをやり直すことになる。
+  it("法人番号が無い既存企業は、法人番号での重複判定に引っかからない", () => {
+    const existing = [
+      { id: "c1", corporate_number: null, website_domain: null, company_name_normalized: "杉岡鉄工所", address_normalized: "大阪府東大阪市長田中2-4-8" },
+    ];
+    expect(matchDuplicate({ corporateNumber: "9876543210987", companyName: "株式会社杉岡鉄工所" }, existing)).toBeNull();
+  });
+
+  it("法人番号が入っていれば、所在地の表記が違っても重複と判定できる", () => {
+    const existing = [
+      { id: "c1", corporate_number: "9876543210987", website_domain: null, company_name_normalized: "杉岡鉄工所", address_normalized: "大阪府東大阪市長田中2-4-8" },
+    ];
+    const hit = matchDuplicate({ corporateNumber: "9876543210987", companyName: "杉岡鉄工所（本社）", address: "東大阪市長田中2丁目4番8号" }, existing);
+    expect(hit).toEqual({ id: "c1", reason: "corporate_number" });
+  });
+});

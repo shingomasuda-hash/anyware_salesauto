@@ -211,6 +211,32 @@ export async function insertCompanySources(db: Db, rows: CompanySourceInsert[]):
   await db.insert(companySources).values(rows).onConflictDoNothing();
 }
 
+/**
+ * 同じ観測を二重に積まずに記録する。
+ *
+ * ユニークインデックスは (company_id, provider, external_id) だが、
+ * PostgreSQL は NULL 同士を別物として扱うため、external_id を持たない観測
+ * （法人番号もドメインも無い情報源）は制約で弾けず、再探索のたびに行が増える。
+ * そこで書き込む観測と同じキーの行を先に消してから入れ直す。
+ * 他の情報源が記録した行には触れない。
+ */
+export async function replaceCompanySources(db: Db, companyId: string, rows: CompanySourceInsert[]): Promise<void> {
+  if (rows.length === 0) return;
+  const keys = rows.map(
+    (r) => sql`(${r.provider}, ${r.external_id ?? ""}, ${r.source_url ?? ""}, ${r.source_type ?? ""})`,
+  );
+  await db.execute(sql`
+    delete from ${companySources}
+    where ${companySources.company_id} = ${companyId}
+      and (
+        ${companySources.provider},
+        coalesce(${companySources.external_id}, ''),
+        coalesce(${companySources.source_url}, ''),
+        coalesce(${companySources.source_type}, '')
+      ) in (${sql.join(keys, sql`, `)})`);
+  await db.insert(companySources).values(rows);
+}
+
 export async function listCompanySources(db: Db, companyId: string): Promise<CompanySourceRow[]> {
   return db.select().from(companySources).where(eq(companySources.company_id, companyId)).orderBy(desc(companySources.confidence));
 }

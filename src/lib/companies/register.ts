@@ -1,5 +1,5 @@
 import type { Db } from "@/db";
-import { getCompanyById, insertCompany } from "@/db/repositories/companies";
+import { getCompanyById, insertCompany, updateCompany } from "@/db/repositories/companies";
 import type { CompanyRow, CompanySource, Json } from "@/db/types";
 import { Logger } from "@/lib/logging/logger";
 import { isUniqueViolation } from "@/db/errors";
@@ -34,6 +34,41 @@ export type RegisterResult =
   | { status: "duplicate"; company: CompanyRow; reason: DedupeMatchReason };
 
 /**
+ * 既存企業に欠けている識別情報を、今回の入力から埋める。
+ *
+ * 名前+所在地で一致した既存企業に法人番号が無いまま放置すると、
+ * 次に同じ企業を GビズINFO で見つけても法人番号では重複と判定できず、
+ * 毎回「新しい企業」として検証・クロールをやり直すことになる（費用と時間の無駄）。
+ * 既にある値は上書きせず、null の項目だけを埋める。
+ */
+async function backfillIdentifiers(
+  db: Db,
+  existing: CompanyRow,
+  input: CompanyInput,
+  address: string | null,
+  prefecture: string | null,
+): Promise<Partial<CompanyRow>> {
+  const patch: Partial<CompanyRow> = {};
+  if (!existing.corporate_number && input.corporateNumber) patch.corporate_number = input.corporateNumber;
+  if (!existing.address && address) {
+    patch.address = address;
+    patch.address_normalized = normalizeAddress(address);
+  }
+  if (!existing.prefecture && prefecture) patch.prefecture = prefecture;
+  if (!existing.city) {
+    const city = input.city ?? extractCity(address, prefecture);
+    if (city) patch.city = city;
+  }
+  if (!existing.phone) {
+    const phone = normalizePhone(input.phone);
+    if (phone) patch.phone = phone;
+  }
+  if (Object.keys(patch).length === 0) return {};
+  await updateCompany(db, existing.id, patch);
+  return patch;
+}
+
+/**
  * 企業を登録する。重複判定（法人番号 > ドメイン > 企業名+所在地）を行い、
  * 既存があれば新規登録せず既存企業を返す。
  * websiteUrl は "候補" として website_candidates に保存し、公式判定はクロールジョブで行う。
@@ -52,8 +87,9 @@ export async function registerCompany(db: Db, input: CompanyInput, logger: Logge
   if (duplicate) {
     const existing = await getCompanyById(db, duplicate.id);
     if (existing) {
-      await logger.info("重複企業のためスキップ", { companyName: name, reason: duplicate.reason, existingId: duplicate.id });
-      return { status: "duplicate", company: existing, reason: duplicate.reason };
+      const filled = await backfillIdentifiers(db, existing, input, address, prefecture);
+      await logger.info("重複企業のためスキップ", { companyName: name, reason: duplicate.reason, existingId: duplicate.id, backfilled: Object.keys(filled) });
+      return { status: "duplicate", company: { ...existing, ...filled }, reason: duplicate.reason };
     }
   }
 
