@@ -23,21 +23,89 @@ export function isMockUrl(url: string): boolean {
   }
 }
 
-function detectCharset(contentType: string | null, buffer: Buffer): string {
+/** ページが宣言している文字コード（HTTP ヘッダ → meta タグ） */
+function declaredCharset(contentType: string | null, buffer: Buffer): string | null {
   const fromHeader = contentType?.match(/charset=([\w-]+)/i)?.[1];
-  if (fromHeader) return fromHeader.toLowerCase();
+  if (fromHeader) return normalizeCharset(fromHeader);
   const head = buffer.subarray(0, 4096).toString("latin1");
   const meta = head.match(/charset=["']?([\w-]+)/i)?.[1];
-  return (meta ?? "utf-8").toLowerCase();
+  return meta ? normalizeCharset(meta) : null;
 }
 
-function decodeBody(buffer: Buffer, charset: string): string {
-  const cs = charset.replace(/_/g, "-");
-  if (cs === "utf-8" || cs === "utf8") return buffer.toString("utf-8");
-  const alias: Record<string, string> = { "shift-jis": "shift_jis", sjis: "shift_jis", "x-sjis": "shift_jis", "windows-31j": "cp932", "euc-jp": "euc-jp", "iso-2022-jp": "iso-2022-jp" };
-  const enc = alias[cs] ?? cs;
-  if (iconv.encodingExists(enc)) return iconv.decode(buffer, enc);
-  return buffer.toString("utf-8");
+function normalizeCharset(charset: string): string {
+  const cs = charset.toLowerCase().replace(/_/g, "-");
+  const alias: Record<string, string> = {
+    utf8: "utf-8",
+    "shift-jis": "shift_jis",
+    shiftjis: "shift_jis",
+    sjis: "shift_jis",
+    "x-sjis": "shift_jis",
+    "ms-kanji": "shift_jis",
+    "windows-31j": "cp932",
+    "cp-932": "cp932",
+    eucjp: "euc-jp",
+    "x-euc-jp": "euc-jp",
+  };
+  return alias[cs] ?? cs;
+}
+
+/** バイト列が厳格な UTF-8 として解釈できるか（多バイト文字を含む場合は強い根拠になる） */
+function isStrictUtf8(buffer: Buffer): boolean {
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 日本語テキストとしての「もっともらしさ」。
+ * 文字化けは、ひらがな・カタカナが消えて珍しい漢字と半角カナが混ざるという形で現れる。
+ */
+function japaneseScore(text: string): number {
+  let score = 0;
+  for (const ch of text.slice(0, 4000)) {
+    const cp = ch.codePointAt(0)!;
+    if (cp === 0xfffd) score -= 20; // 変換できなかった文字
+    else if (cp >= 0x3040 && cp <= 0x30ff) score += 3; // ひらがな・カタカナ
+    else if (cp >= 0x4e00 && cp <= 0x9fff) score += 1; // 漢字
+    else if (cp >= 0xff61 && cp <= 0xff9f) score -= 3; // 半角カナ（文字化けで多発する）
+    else if (cp >= 0xe000 && cp <= 0xf8ff) score -= 10; // 外字
+    else if (cp < 0x80) score += 0.1; // ASCII
+  }
+  return score;
+}
+
+/**
+ * HTML のバイト列を文字列に変換する。
+ *
+ * 宣言された文字コードは信用しきれない。実データ検証では
+ * 「meta が shift_jis なのに実体は UTF-8」のページで社名が
+ * 「兜嚮ｩ商会」のように化け、社名・住所の照合がすべて外れていた。
+ * 宣言・UTF-8・CP932・EUC-JP を実際に変換して、
+ * 日本語として最ももっともらしい結果を採用する。
+ */
+export function decodeHtml(buffer: Buffer, contentType: string | null): { text: string; charset: string } {
+  const declared = declaredCharset(contentType, buffer);
+
+  // 多バイト文字を含み、厳格な UTF-8 として通るなら UTF-8 で確定（宣言より強い根拠）
+  const hasMultibyte = buffer.some((b) => b >= 0x80);
+  if (hasMultibyte && isStrictUtf8(buffer)) {
+    return { text: buffer.toString("utf-8"), charset: "utf-8" };
+  }
+  if (!hasMultibyte) {
+    return { text: buffer.toString("utf-8"), charset: declared ?? "utf-8" };
+  }
+
+  const candidates = [...new Set([declared, "cp932", "euc-jp", "utf-8"].filter((c): c is string => Boolean(c)))];
+  let best: { text: string; charset: string; score: number } | null = null;
+  for (const charset of candidates) {
+    const text = iconv.encodingExists(charset) ? iconv.decode(buffer, charset) : buffer.toString("utf-8");
+    const score = japaneseScore(text);
+    if (!best || score > best.score) best = { text, charset, score };
+  }
+  return best ? { text: best.text, charset: best.charset } : { text: buffer.toString("utf-8"), charset: "utf-8" };
 }
 
 /**
@@ -69,8 +137,7 @@ export async function fetchHtml(url: string, options: { timeoutMs?: number; user
     }
     const arrayBuffer = await res.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer.byteLength > cfg.maxBodyBytes ? arrayBuffer.slice(0, cfg.maxBodyBytes) : arrayBuffer);
-    const charset = detectCharset(contentType, buffer);
-    const body = decodeBody(buffer, charset);
+    const { text: body } = decodeHtml(buffer, contentType);
     return { url, finalUrl: res.url || url, status: res.status, contentType, body, ok: res.ok };
   } catch (err) {
     const message = err instanceof Error ? (err.name === "AbortError" ? "timeout" : err.message) : String(err);

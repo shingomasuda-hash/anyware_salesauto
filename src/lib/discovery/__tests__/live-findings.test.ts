@@ -240,3 +240,48 @@ describe("兵庫県の検証で出た見出しノイズ", () => {
     }
   });
 });
+
+describe("京都府の検証で出た見出しノイズ", () => {
+  const rejected = [
+    // 法人格が付いていても、中身が一般名詞だけなら企業名ではない
+    "株式会社会社情報",
+    "株式会社本社工場",
+    "株式会社-プラスチック樹脂・アルミ切削加工",
+    // 一般名詞のみ
+    "自動車部品",
+    "上場企業",
+    "家電量販店",
+    // ページ見出し
+    "京都研究所概要・アクセスマップ",
+  ];
+  for (const name of rejected) {
+    it(`除外する: ${name}`, () => {
+      expect(isPlausibleCompany(candidate(cleanCompanyName(name)))).toBe(false);
+    });
+  }
+
+  it("京都府で実在した企業は通す", () => {
+    for (const name of [
+      "株式会社水江鉄工",
+      "株式会社宇治精機",
+      "カイトウ精機株式会社",
+      "株式会社瑞晃仏具製作所",
+      "株式会社若林佛具製作所",
+      "株式会社大黒商会",
+      "株式会社大同商会",
+      "京都電機器株式会社",
+      "京都樹脂株式会社",
+      "株式会社ベルクシーエース",
+      "株式会社ナンゴ",
+      "株式会社筒井",
+      "株式会社常盤",
+      "大京チェーン本店",
+    ]) {
+      expect(isPlausibleCompany(candidate(cleanCompanyName(name)))).toBe(true);
+    }
+  });
+
+  it("地名が前に付いた実企業名は残す", () => {
+    expect(isPlausibleCompany(candidate(cleanCompanyName("京都 前川工業化学株式会社")))).toBe(true);
+  });
+});

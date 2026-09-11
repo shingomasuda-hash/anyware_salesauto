@@ -176,7 +176,7 @@ export function toCandidate(input: RawCandidateInput): DiscoveryCandidate {
  * 例:「電気機器」「切削加工品」「強み」（検索結果の見出しが社名として拾われたもの）
  */
 const GENERIC_TERM =
-  "会社|電力|ガス|水道|市場|マーケット|電気|電子|電機|機械|機器|金属|精密|樹脂|プラスチック|ゴム|化学|化成|薬品|鉄|鋼|鉄鋼|アルミ|ステンレス|銅|切削|研削|研磨|溶接|板金|鋳造|鍛造|プレス|成形|射出成形|表面処理|熱処理|めっき|メッキ|塗装|組立|加工|製造|生産|製品|部品|装置|設備|材料|素材|工業|産業|工場|技術|品|類|業|強み|特徴|メリット|デメリット|事例|実績|価格|費用|料金|納期|種類|方法|一覧|情報|紹介";
+  "会社|企業|上場|大手|本社|支社|支店|本店|営業所|量販店|販売店|専門店|商店|自動車|家電|食品|建材|電力|ガス|水道|市場|マーケット|電気|電子|電機|機械|機器|金属|精密|樹脂|プラスチック|ゴム|化学|化成|薬品|鉄|鋼|鉄鋼|アルミ|ステンレス|銅|切削|研削|研磨|溶接|板金|鋳造|鍛造|プレス|成形|射出成形|表面処理|熱処理|めっき|メッキ|塗装|組立|加工|製造|生産|製品|部品|装置|設備|材料|素材|工業|産業|工場|技術|品|類|業|強み|特徴|メリット|デメリット|事例|実績|価格|費用|料金|納期|種類|方法|一覧|情報|紹介";
 const GENERIC_ONLY_NAME = new RegExp(`^(?:${GENERIC_TERM})+$`);
 
 /**
@@ -184,6 +184,17 @@ const GENERIC_ONLY_NAME = new RegExp(`^(?:${GENERIC_TERM})+$`);
  * 「大阪化学工業薬品協会INDEX」「大阪府電気工事工業組合」のような一覧ページを弾く。
  */
 const INDUSTRY_BODY = /(協会|工業会|商工会|商工会議所|連合会|振興会|協議会|コミッティ|組合|同業会)/;
+
+/** 法人格・記号・空白を除いた社名の中身 */
+function coreName(name: string): string {
+  return name.replace(new RegExp(LEGAL_FORMS, "g"), "").replace(/[\s・･,，、。\-‐－―—_〜~&:：\/／|｜()（）「」【】]/g, "");
+}
+
+/** 一般名詞だけで構成されているか（固有名詞が1つも無い） */
+function isGenericOnly(value: string): boolean {
+  const core = coreName(value);
+  return core.length > 0 && GENERIC_ONLY_NAME.test(core);
+}
 
 /** 日本語（かな・漢字）を含むか */
 const HAS_JAPANESE = /[ぁ-んァ-ヶ一-龠]/;
@@ -194,6 +205,8 @@ const NON_COMPANY_PATTERNS: RegExp[] = [
   /(とは|の方法|のこと|の話|について|ガイド|コラム|ニュース)$/,
   // 「電力会社:電気&ガスセットおすすめランキング」のように語中に現れる記事表現
   /ランキング/,
+  // 「京都研究所概要・アクセスマップ」のようなページ見出し
+  /(アクセスマップ|アクセス|地図|概要|案内)$/,
   // 「大阪府の金属加工の会社104社」「工場 [3社]」など件数を含む一覧ページ
   /\d+\s*社/,
   // 「○○の一覧」「○○業者」「○○を探す」
@@ -220,6 +233,9 @@ export function isPlausibleCompany(candidate: DiscoveryCandidate): boolean {
   if (hasLegalForm) {
     // 「…をお探しなら株式会社」のように法人格の直前が助詞で終わるものは社名ではない
     if (/(なら|ならば|をお探し|お探し|など|ください|は|を|が|へ|と|より)(株式会社|有限会社|合同会社|合資会社|合名会社)$/.test(n)) return false;
+    // 「株式会社会社情報」「株式会社本社工場」のように、法人格を除くと一般名詞しか残らないものは
+    // 検索結果の見出しに法人格が紛れ込んだだけで、企業名ではない
+    if (isGenericOnly(coreName(n))) return false;
     return n.length <= 60;
   }
 
@@ -231,7 +247,7 @@ export function isPlausibleCompany(candidate: DiscoveryCandidate): boolean {
   if (INDUSTRY_BODY.test(n)) return false;
 
   // 業種・工程・製品の一般名詞だけの名前は見出しを拾ったもの
-  if (GENERIC_ONLY_NAME.test(n.replace(/\s/g, ""))) return false;
+  if (isGenericOnly(n)) return false;
 
   // 「実像~ 大阪ブランドコミッティ 家電パネル」のように語が3つ以上並ぶ日本語の見出しは社名ではない
   const tokens = n.split(/\s+/).filter(Boolean);
