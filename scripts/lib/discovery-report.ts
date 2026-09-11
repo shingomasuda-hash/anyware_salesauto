@@ -8,6 +8,7 @@ import type { Db } from "../../src/db";
 import type { CompanyRow, DiscoveryCandidateRow, DiscoveryRunRow } from "../../src/db/types";
 import { getDiscoveryRun, listCandidatesByRun, listCompanySources, refreshDiscoveryRunCounts } from "../../src/db/repositories/discovery";
 import { getCompanyDetail } from "../../src/lib/companies/queries";
+import { MIN_ANALYSIS_CONFIDENCE } from "../../src/lib/companies/constants";
 import { PROVIDER_LABELS } from "../../src/lib/discovery/criteria";
 import { searchRequestsToUsd } from "../../src/lib/config/discovery";
 import { getEnv } from "../../src/lib/config/env";
@@ -233,6 +234,19 @@ export async function printCompanyMetrics(db: Db, candidates: DiscoveryCandidate
   const ranks = companies.map((d) => d.analysis?.sales_priority_rank).filter(Boolean) as string[];
   const dist = ranks.reduce<Record<string, number>>((acc, r) => ({ ...acc, [r]: (acc[r] ?? 0) + 1 }), {});
   console.log(`営業ランク分布      : ${["A", "B", "C", "D"].map((r) => `${r}=${dist[r] ?? 0}`).join(" / ")}`);
+
+  // 分析はしたが AI が判断しきれなかった企業は営業リストに出さない（確度が低い / ランクなし）
+  const lowConfidence = companies.filter(
+    (d) => d.analysis && ((d.analysis.confidence_score ?? 0) < MIN_ANALYSIS_CONFIDENCE || !d.analysis.sales_priority_rank),
+  );
+  if (lowConfidence.length > 0) {
+    console.log(`確度不足で除外      : ${pct(lowConfidence.length, companies.length)}  ← 営業リストに出しません（確度${MIN_ANALYSIS_CONFIDENCE}未満 or ランクなし）`);
+    for (const d of lowConfidence.slice(0, 5)) {
+      console.log(`    - ${d.company.company_name}（確度 ${d.analysis?.confidence_score ?? "—"} / ランク ${d.analysis?.sales_priority_rank ?? "なし"}）`);
+    }
+    if (lowConfidence.length > 5) console.log(`    … 他 ${lowConfidence.length - 5}件`);
+    console.log("    ※ 多い場合は ANTHROPIC_MAX_CONTEXT_CHARS / ANTHROPIC_EFFORT を上げると判断材料が増えます");
+  }
 
   const allowed = companies.reduce<Record<string, number>>((acc, d) => {
     const k = d.company.sales_contact_allowed;

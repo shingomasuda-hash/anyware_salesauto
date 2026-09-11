@@ -1,6 +1,7 @@
 import { z } from "zod";
-import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import { companyOverview } from "@/db/schema";
+import { MIN_ANALYSIS_CONFIDENCE } from "./constants";
 import type { OverviewQuery } from "@/db/repositories/companies";
 
 const optionalStr = z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.string().optional());
@@ -44,6 +45,11 @@ export const companyFilterSchema = z.object({
   hasEmail: flag,
   /** 文面（取材依頼 / 営業）の下書きがある企業だけ（AI分析まで進んだ企業） */
   hasOutreach: flag,
+  /**
+   * AI が判断しきれなかった企業（確度が低い / ランクが付かない）も表示する。
+   * 既定では除外する。まだ分析していない企業は既定でも表示する。
+   */
+  includeLowConfidence: flag,
   excludeRestricted: flag,
   unanalyzed: flag,
   needsReview: flag,
@@ -103,6 +109,11 @@ export function buildCompanyWhere(f: CompanyFilters): SQL | undefined {
   if (f.hasContact) c.push(eq(v.has_contact, true));
   if (f.hasEmail) c.push(eq(v.has_email, true));
   if (f.hasOutreach) c.push(eq(v.has_outreach, true));
+  // 分析したのに判断材料が足りなかった企業は営業リストに出さない。
+  // 未分析（analysis_id が null）は対象外 — 機械抽出の情報で絞り込めるため残す。
+  if (!f.includeLowConfidence) {
+    c.push(or(isNull(v.analysis_id), and(gte(v.confidence_score, MIN_ANALYSIS_CONFIDENCE), isNotNull(v.sales_priority_rank)))!);
+  }
   // 営業対象の絞り込みでは「不明（未確認）」も除外する。
   // 営業拒否表記を確認できていない企業を、営業可能として扱わないため。
   if (f.excludeRestricted) c.push(eq(v.sales_contact_allowed, "true"));

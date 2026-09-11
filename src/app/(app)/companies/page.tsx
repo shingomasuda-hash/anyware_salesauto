@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { CompanyFilterForm } from "@/components/companies/company-filters";
 import { CompanyTable } from "@/components/companies/company-table";
 import { Pagination } from "@/components/companies/pagination";
+import { MIN_ANALYSIS_CONFIDENCE } from "@/lib/companies/constants";
 import { filtersToSearchParams, parseCompanyFilters } from "@/lib/companies/filters";
 import { listCompanies } from "@/lib/companies/queries";
 import { getDb } from "@/db";
@@ -23,11 +24,11 @@ export default async function CompaniesPage({ searchParams }: { searchParams: Pr
     <div>
       <PageHeader
         title="企業一覧"
-        description={
-          filters.includeNoRecruitPage
-            ? "収集・分析済みの企業（採用ページなしを含む）。フィルタ条件はそのまま CSV 出力に適用されます。"
-            : "採用ページを確認できた企業のみ表示しています。企業名をクリックすると公式サイトが開きます。フィルタ条件はそのまま CSV 出力に適用されます。"
-        }
+        description={[
+          filters.includeNoRecruitPage ? "採用ページなしを含む全企業" : "採用ページを確認できた企業のみ",
+          filters.includeLowConfidence ? "確度が低い企業も含む" : `AIが判断しきれなかった企業（確度${MIN_ANALYSIS_CONFIDENCE}未満）は除外`,
+          "企業名をクリックすると公式サイトが開きます。フィルタ条件はそのまま CSV 出力に適用されます。",
+        ].join(" / ")}
         actions={
           <>
             <Button asChild variant="outline">

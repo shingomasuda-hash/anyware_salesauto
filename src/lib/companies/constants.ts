@@ -109,6 +109,18 @@ export const CORPORATE_TYPES: { code: string; label: string; suffix: string[] }[
   { code: "399", label: "その他の設立登記法人", suffix: ["一般社団法人", "一般財団法人", "医療法人", "社会福祉法人", "学校法人", "NPO法人", "特定非営利活動法人"] },
 ];
 
+/**
+ * 営業リストに載せる下限の確度。
+ *
+ * AI が「判断材料が足りない」と判定した企業（confidence が低い、
+ * またはスコアが1つも出ずランクが付かない）は、営業リストに載せても判断に使えない。
+ * 既定ではこの値を下回る企業を一覧・CSV から除く。
+ *
+ * まだ分析していない企業（AI予算の上限に達した分など）は除外しない。
+ * それらは機械抽出の情報（採用ページ・問い合わせ先・SNS）で絞り込めるため。
+ */
+export const MIN_ANALYSIS_CONFIDENCE = 30;
+
 export const SALES_RANKS: { key: "A" | "B" | "C" | "D"; label: string; description: string }[] = [
   { key: "A", label: "A", description: "非常に営業優先度が高い" },
   { key: "B", label: "B", description: "営業候補" },
