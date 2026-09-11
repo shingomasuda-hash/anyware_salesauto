@@ -14,6 +14,7 @@ import type { CrawlSummary } from "@/lib/crawler/types";
 import { fetchHtml } from "@/lib/integrations/http/fetch";
 import { getPlacesProvider } from "@/lib/integrations/google-places";
 import { Logger, serializeError } from "@/lib/logging/logger";
+import { shouldEnqueueAnalysis } from "@/lib/ai/gate";
 import { enqueueAnalysisJob } from "./enqueue";
 
 interface StoredCandidate {
@@ -109,8 +110,14 @@ export async function processCrawlJob(db: Db, job: CrawlJobRow, logger: Logger):
   });
 
   // 5) 分析ジョブ投入
+  // 採用ページを確認できない企業には AI を使わない（営業リストの条件であり、費用の大半がここで決まる）
   if (job.enqueue_analysis) {
-    await enqueueAnalysisJob(db, company.id, { searchJobId: job.search_job_id, priority: job.priority });
+    const gate = shouldEnqueueAnalysis(summary.recruitPageUrl);
+    if (gate.ok) {
+      await enqueueAnalysisJob(db, company.id, { searchJobId: job.search_job_id, priority: job.priority });
+    } else {
+      await logger.info(gate.reason ?? "AI分析を見送り", { company: company.company_name });
+    }
   }
   return { outcome: "crawled", pages: summary.pages.length, officialSiteConfidence: site.confidence, websiteUrl: site.url };
 }

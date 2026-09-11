@@ -41,6 +41,21 @@ const SPECS: Spec[] = [
     showValue: true,
     fallback: "未設定でも既定の hybrid で動作します（明示設定を推奨）",
   },
+  {
+    name: "AI_MONTHLY_BUDGET_JPY",
+    need: "recommended",
+    purpose: "当月のAI費用の上限（円）。到達するとAI分析を自動で見送る",
+    showValue: true,
+    fallback: "未設定でも既定の 10000円 で動作します",
+  },
+  {
+    name: "ANALYSIS_REQUIRE_RECRUIT_PAGE",
+    need: "recommended",
+    purpose: "採用ページのある企業だけAI分析する（費用の大半を決める）",
+    expected: "true",
+    showValue: true,
+    fallback: "未設定でも既定の true で動作します",
+  },
   // Live Test を成立させるために併せて必要なもの
   { name: "NEON_AUTH_BASE_URL", need: "recommended", purpose: "管理画面のログイン" },
   { name: "NEON_AUTH_COOKIE_SECRET", need: "recommended", purpose: "セッション Cookie 署名" },

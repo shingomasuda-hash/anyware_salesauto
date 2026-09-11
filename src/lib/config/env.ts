@@ -25,7 +25,21 @@ const envSchema = z.object({
   ANTHROPIC_API_KEY: optionalString,
   ANTHROPIC_MODEL: z.string().default("claude-opus-5"),
   ANTHROPIC_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().default(8000),
-  ANTHROPIC_EFFORT: z.enum(["low", "medium", "high"]).default("medium"),
+  // 構造化抽出が中心の分析のため既定は low。判断の質を上げたい場合だけ medium / high に上げる。
+  ANTHROPIC_EFFORT: z.enum(["low", "medium", "high"]).default("low"),
+  /** 分析1回あたりに Claude へ渡す本文テキストの上限（文字）。入力トークン＝費用に直結する */
+  ANTHROPIC_MAX_CONTEXT_CHARS: z.coerce.number().int().positive().default(10_000),
+
+  // --- AI 費用のガード ---
+  /** 当月の Claude API 費用の上限（円）。0 以下で上限なし */
+  AI_MONTHLY_BUDGET_JPY: z.coerce.number().int().nonnegative().default(10_000),
+  /** 費用表示・予算判定に使う為替レート（1 USD = N 円） */
+  AI_USD_JPY_RATE: z.coerce.number().positive().default(155),
+  /** 採用ページを確認できた企業だけ AI 分析する（費用の大半はここで決まる） */
+  ANALYSIS_REQUIRE_RECRUIT_PAGE: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
 
   GBIZ_API_KEY: optionalString,
   GOOGLE_MAPS_API_KEY: optionalString,

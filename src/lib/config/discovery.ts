@@ -23,6 +23,17 @@ export interface VerificationThresholds {
   needsReview: number;
 }
 
+/**
+ * Web検索（Brave Search）の公開単価: 1,000リクエストあたり 5 USD。
+ * Claude と並んで月額費用を決めるため、レポートで可視化する。
+ */
+export const SEARCH_COST_USD_PER_1000_REQUESTS = 5.0;
+
+/** Web検索のリクエスト数から USD を概算する */
+export function searchRequestsToUsd(requests: number): number {
+  return (requests / 1000) * SEARCH_COST_USD_PER_1000_REQUESTS;
+}
+
 export function getDiscoveryConfig() {
   const env = getEnv();
   return {

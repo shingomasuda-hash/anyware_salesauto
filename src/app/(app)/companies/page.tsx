@@ -23,7 +23,11 @@ export default async function CompaniesPage({ searchParams }: { searchParams: Pr
     <div>
       <PageHeader
         title="企業一覧"
-        description="収集・分析済みの企業。フィルタ条件はそのまま CSV 出力に適用されます。"
+        description={
+          filters.includeNoRecruitPage
+            ? "収集・分析済みの企業（採用ページなしを含む）。フィルタ条件はそのまま CSV 出力に適用されます。"
+            : "採用ページを確認できた企業のみ表示しています。企業名をクリックすると公式サイトが開きます。フィルタ条件はそのまま CSV 出力に適用されます。"
+        }
         actions={
           <>
             <Button asChild variant="outline">

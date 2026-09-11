@@ -9,6 +9,8 @@ import type { CompanyRow, DiscoveryCandidateRow, DiscoveryRunRow } from "../../s
 import { getDiscoveryRun, listCandidatesByRun, listCompanySources, refreshDiscoveryRunCounts } from "../../src/db/repositories/discovery";
 import { getCompanyDetail } from "../../src/lib/companies/queries";
 import { PROVIDER_LABELS } from "../../src/lib/discovery/criteria";
+import { searchRequestsToUsd } from "../../src/lib/config/discovery";
+import { getEnv } from "../../src/lib/config/env";
 import type { DiscoveryProviderName } from "../../src/lib/discovery/types";
 
 const RULE = "─".repeat(78);
@@ -254,6 +256,17 @@ async function printProviderContribution(db: Db, run: DiscoveryRunRow, candidate
       if ((st.requestCount ?? 0) > 0) activeDiscovery++;
       console.log(`  ${label} 稼働（リクエスト ${st.requestCount ?? 0}回）`);
     }
+  }
+
+  // Web検索は Claude と並ぶ課金要素。月額の見通しを立てられるよう実リクエスト数から概算する
+  const searchRequests = (stats.web_search?.requestCount ?? 0) + (stats.official_web?.requestCount ?? 0);
+  if (searchRequests > 0) {
+    const rate = getEnv().AI_USD_JPY_RATE;
+    const usd = searchRequestsToUsd(searchRequests);
+    const perCompany = searchRequests / Math.max(1, newOnes.length);
+    console.log(`\nWeb検索の利用     : ${searchRequests}回（候補1件あたり ${perCompany.toFixed(1)}回）`);
+    console.log(`  概算費用        : $${usd.toFixed(2)} ≒ ${Math.round(usd * rate).toLocaleString()}円（Brave Search: $5 / 1,000リクエスト）`);
+    console.log(`  この比率のまま月3,000社を発見した場合: 約${Math.round(searchRequestsToUsd(perCompany * 3000) * rate).toLocaleString()}円/月`);
   }
 
   console.log("Provider別 新規企業数（その情報源が発見に関与した候補）:");

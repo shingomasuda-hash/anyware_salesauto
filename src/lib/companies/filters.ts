@@ -32,6 +32,13 @@ export const companyFilterSchema = z.object({
   maxSns: optionalNum,
   maxWeb: optionalNum,
   recruiting: flag,
+  /**
+   * 採用ページを確認できなかった企業も表示する。
+   * 営業リストの既定は「採用ページのある企業のみ」なので、この明示チェックで初めて全件になる
+   * （既定 ON のチェックボックスにすると GET フォームで「外した」状態を表現できないため、
+   *   条件をゆるめる側をフラグにしている）。
+   */
+  includeNoRecruitPage: flag,
   hasWebsite: flag,
   hasContact: flag,
   hasEmail: flag,
@@ -87,6 +94,9 @@ export function buildCompanyWhere(f: CompanyFilters): SQL | undefined {
   if (f.maxSns !== undefined) c.push(lte(v.sns_activity_score, f.maxSns));
   if (f.maxWeb !== undefined) c.push(lte(v.web_quality_score, f.maxWeb));
   if (f.recruiting) c.push(eq(v.recruiting_status, "active"));
+  // 営業リストの既定は「採用ページのある企業のみ」。
+  // 採用ページの有無はクロールで機械的に確認した事実であり、AI の判定ではない。
+  if (!f.includeNoRecruitPage) c.push(eq(v.has_recruit_page, true));
   if (f.hasWebsite) c.push(eq(v.has_website, true));
   if (f.hasContact) c.push(eq(v.has_contact, true));
   if (f.hasEmail) c.push(eq(v.has_email, true));

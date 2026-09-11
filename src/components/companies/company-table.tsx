@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ExternalLink } from "lucide-react";
+import { FileText } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ContactAllowedBadge, RankBadge, ScoreCell, YesNo } from "./badges";
 import { employeeRangeLabel, industryLabel } from "@/lib/companies/constants";
@@ -39,16 +39,29 @@ export function CompanyTable({ rows }: { rows: CompanyOverviewRow[] }) {
             rows.map((r) => (
               <TableRow key={r.id}>
                 <TableCell>
+                  {/* 企業名は公式HPへ直接飛ぶ。分析結果は隣の「詳細」から開く */}
                   <div className="flex items-center gap-1.5">
-                    <Link href={`/companies/${r.id}`} className="max-w-64 truncate font-medium hover:underline" title={r.company_name}>
-                      {r.company_name}
-                    </Link>
                     {r.website_url ? (
-                      <a href={r.website_url} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground" title={r.website_url}>
-                        <ExternalLink className="size-3.5" />
+                      <a
+                        href={r.website_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="max-w-64 truncate font-medium hover:underline"
+                        title={`${r.company_name}の公式サイトを開く（${r.website_url}）`}
+                      >
+                        {r.company_name}
                       </a>
-                    ) : null}
+                    ) : (
+                      <Link href={`/companies/${r.id}`} className="max-w-64 truncate font-medium hover:underline" title={`${r.company_name}（公式サイト未確認）`}>
+                        {r.company_name}
+                      </Link>
+                    )}
+                    <Link href={`/companies/${r.id}`} className="text-muted-foreground hover:text-foreground" title="分析結果の詳細を開く">
+                      <FileText className="size-3.5" />
+                      <span className="sr-only">{r.company_name}の詳細</span>
+                    </Link>
                   </div>
+                  {r.website_url ? null : <div className="text-xs text-muted-foreground">公式HP未確認</div>}
                   {r.verification_status === "needs_review" ? <div className="text-xs text-amber-700">公式サイト要確認</div> : null}
                 </TableCell>
                 <TableCell>{r.prefecture ?? "—"}</TableCell>

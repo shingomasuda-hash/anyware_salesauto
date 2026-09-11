@@ -29,7 +29,13 @@ export const COMPANY_ANALYSIS_SYSTEM_PROMPT = `あなたは日本の中小企業
 
 ## 出力
 指定された JSON スキーマに厳密に従う。日本語で簡潔に書く。
-analysis_reason には、各スコアの根拠を「確認できた事実」と「推測」を分けて箇条書きで説明する。`;
+analysis_reason には、各スコアの根拠を「確認できた事実」と「推測」を分けて箇条書きで説明する。
+
+## 簡潔さ（重要）
+配列は「営業判断を左右するものだけ」を入れる。上限まで埋めなくてよい。
+同じ内容を observed_facts と detected_issues の両方に書かない。
+evidence は各スコアの根拠になる代表例だけでよく、1件も無ければ空配列を返す。
+前置き・繰り返し・一般論は書かない。`;
 
 export function buildCompanyAnalysisUserPrompt(contextText: string): string {
   return `以下は分析対象企業の情報です。指示に従って JSON で分析結果を返してください。

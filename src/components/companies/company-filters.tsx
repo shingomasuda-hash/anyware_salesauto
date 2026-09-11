@@ -74,7 +74,9 @@ export function CompanyFilterForm({ filters }: { filters: CompanyFilters }) {
         </NativeSelect>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-        <Check name="recruiting" label="採用あり" checked={filters.recruiting} />
+        {/* 既定は「採用ページあり」のみ。全件を見たいときだけ外す */}
+        <Check name="includeNoRecruitPage" label="採用ページなしも表示" checked={filters.includeNoRecruitPage} />
+        <Check name="recruiting" label="採用中（AI判定）" checked={filters.recruiting} />
         <Check name="hasWebsite" label="公式HPあり" checked={filters.hasWebsite} />
         <Check name="hasContact" label="問い合わせ先あり" checked={filters.hasContact} />
         <Check name="hasEmail" label="メールアドレスあり" checked={filters.hasEmail} />

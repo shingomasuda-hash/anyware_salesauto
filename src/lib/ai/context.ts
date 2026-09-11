@@ -1,22 +1,28 @@
 import type { CompanyPageRow, CompanyRow } from "@/db/types";
 import type { PageType } from "@/lib/crawler/types";
 
-/** ページ種別ごとの文字数予算（トークン節約のため TOP 全文を毎回送らない） */
+/**
+ * ページ種別ごとの文字数予算（トークン節約のため TOP 全文を毎回送らない）。
+ * 入力トークンは費用の約半分を占めるため、判断に効くページへ厚く配分する。
+ * - 採用・会社概要: スコアの根拠が集中するので厚め
+ * - 問い合わせ・プライバシー: 営業拒否表記の検出に必要な分だけ確保する
+ * - ニュース・その他: 冒頭だけで足りる
+ */
 const PAGE_BUDGET: Record<PageType | "default", number> = {
-  top: 2500,
-  company: 3500,
-  business: 2500,
-  recruit: 3500,
-  recruit_new_graduate: 2500,
-  recruit_mid_career: 2500,
-  job_listing: 2500,
-  news: 1200,
-  employee: 1500,
-  message: 1500,
-  contact: 1500,
-  privacy: 600,
-  other: 800,
-  default: 800,
+  top: 1200,
+  company: 1800,
+  business: 1200,
+  recruit: 1800,
+  recruit_new_graduate: 1000,
+  recruit_mid_career: 1000,
+  job_listing: 1000,
+  news: 400,
+  employee: 600,
+  message: 500,
+  contact: 1000,
+  privacy: 500,
+  other: 300,
+  default: 300,
 };
 
 const TYPE_ORDER: PageType[] = ["top", "company", "business", "recruit", "recruit_new_graduate", "recruit_mid_career", "job_listing", "contact", "employee", "message", "news", "other", "privacy"];
@@ -46,7 +52,7 @@ export function buildAnalysisContext(company: CompanyRow, pages: CompanyPageRow[
     company.employee_count !== null ? `従業員数(登録): ${company.employee_count}名` : `従業員数(登録): 不明`,
     company.established_date ? `設立: ${company.established_date}` : null,
     company.representative_name ? `代表者: ${company.representative_name}` : null,
-    company.description ? `概要(登録): ${company.description.slice(0, 400)}` : null,
+    company.description ? `概要(登録): ${company.description.slice(0, 200)}` : null,
     company.website_url ? `公式サイト: ${company.website_url}` : null,
     `SNS: ${[
       company.instagram_url && `Instagram=${company.instagram_url}`,

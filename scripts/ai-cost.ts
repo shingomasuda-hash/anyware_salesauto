@@ -14,19 +14,8 @@ config();
 
 import { sql } from "drizzle-orm";
 import { getDb, rawRows } from "../src/db";
-
-/**
- * 公開されている100万トークンあたりの単価（USD）。
- * キャッシュ書き込みは入力の1.25倍、読み込みは0.1倍。
- */
-const RATES: Record<string, { input: number; output: number }> = {
-  "claude-opus-5": { input: 5.0, output: 25.0 },
-  "claude-opus-4-8": { input: 5.0, output: 25.0 },
-  "claude-sonnet-5": { input: 2.0, output: 10.0 },
-  "claude-haiku-4-5": { input: 1.0, output: 5.0 },
-};
-const CACHE_WRITE_MULTIPLIER = 1.25;
-const CACHE_READ_MULTIPLIER = 0.1;
+import { CACHE_READ_MULTIPLIER, CACHE_WRITE_MULTIPLIER, MODEL_RATES as RATES, getMonthlySpend } from "../src/lib/ai/pricing";
+import { getEnv } from "../src/lib/config/env";
 
 // rawRows の型制約を満たすため interface ではなく type を使う
 type UsageRow = {
@@ -109,10 +98,31 @@ async function main() {
     console.log(`1社あたり    : ${usd(perCompany)}（分析成功 ${totalOk}社の平均）`);
     if (project) {
       console.log(`\n${project}社を分析した場合の予測: ${usd(perCompany * project)}`);
-      console.log(`  ※ 実際には公式サイトを確認できず分析に至らない企業があるため、これより安くなります`);
+      console.log(`  ※ 実際には公式サイト未確認・採用ページ無しで分析に至らない企業があるため、これより安くなります`);
+      console.log(`  ※ 円換算: 約${Math.round(perCompany * project * getEnv().AI_USD_JPY_RATE).toLocaleString()}円`);
     }
   }
-  if (unknownModel) console.log("\n※ 単価が未登録のモデルがあります（scripts/ai-cost.ts の RATES に追加してください）");
+  if (unknownModel) console.log("\n※ 単価が未登録のモデルがあります（src/lib/ai/pricing.ts の MODEL_RATES に追加してください）");
+
+  // 当月の予算消化（AI_MONTHLY_BUDGET_JPY に達すると AI 分析を自動で見送る）
+  const env = getEnv();
+  const spend = await getMonthlySpend(db);
+  console.log(`\n=== 当月のAI予算 ===`);
+  console.log(`当月の使用     : ${usd(spend.usd)} ≒ ${Math.round(spend.jpy).toLocaleString()}円（${spend.since.slice(0, 10)}以降）`);
+  if (spend.budgetJpy > 0) {
+    const pctUsed = (spend.jpy / spend.budgetJpy) * 100;
+    console.log(`上限           : ${spend.budgetJpy.toLocaleString()}円（AI_MONTHLY_BUDGET_JPY）`);
+    console.log(`残り           : ${Math.round(spend.remainingJpy).toLocaleString()}円（消化 ${pctUsed.toFixed(1)}%）`);
+    if (totalOk > 0) {
+      const perCompanyJpy = (grandTotal / totalOk) * env.AI_USD_JPY_RATE;
+      if (perCompanyJpy > 0) console.log(`残りで分析可能 : 約${Math.max(0, Math.floor(spend.remainingJpy / perCompanyJpy)).toLocaleString()}社（実績平均 ${Math.round(perCompanyJpy)}円/社で計算）`);
+    }
+    if (spend.remainingJpy <= 0) console.log("→ 上限に達しているため、AI分析は自動的に見送られます（クロールと企業探索は継続します）");
+  } else {
+    console.log("上限           : なし（AI_MONTHLY_BUDGET_JPY=0）");
+  }
+  console.log(`為替           : 1USD = ${env.AI_USD_JPY_RATE}円（AI_USD_JPY_RATE）`);
+
   console.log("\n※ 上記は公開単価からの概算です。請求の正は Anthropic Console の Billing を確認してください。");
 }
 
