@@ -9,6 +9,7 @@ config();
 
 import { getDb } from "../src/db";
 import { countCandidatesByStatus, getDiscoveryRun, listCandidatesByRun } from "../src/db/repositories/discovery";
+import { countJobsByStatus } from "../src/db/repositories/jobs";
 import { reportDiscoveryRun } from "./lib/discovery-report";
 import { getDataMode } from "../src/lib/config/env";
 import { getProviderAvailability } from "../src/lib/discovery/providers";
@@ -51,8 +52,21 @@ async function main() {
     console.log(
       `[discovery] pass ${i + 1}: phase=${run?.phase} status=${run?.status} 新規候補=${run?.discovered_count} 確認済=${run?.verified_count} 要確認=${run?.needs_review_count} 重複(別軸)=${run?.duplicate_count} 登録=${run?.promoted_count} (jobs: crawl=${stats.crawlJobs} analysis=${stats.analysisJobs} failures=${stats.failures})`,
     );
-    if (run && ["completed", "partially_completed", "failed", "cancelled"].includes(run.status) && stats.stoppedReason === "empty") break;
-    if (stats.stoppedReason === "empty" && stats.discoverySteps === 0) break;
+    // 探索が終わっても、クロール・AI分析のジョブが残っていれば処理を続ける。
+    // ここで打ち切ると「登録はされたが未クロール」の企業が残り、AI分析まで到達しない。
+    const [crawl, analysis] = await Promise.all([countJobsByStatus(db, "crawl"), countJobsByStatus(db, "analysis")]);
+    const waiting = crawl.pending + crawl.retrying + crawl.processing + analysis.pending + analysis.retrying + analysis.processing;
+    if (waiting > 0) {
+      console.log(`[discovery]   残ジョブ: クロール${crawl.pending + crawl.retrying + crawl.processing}件 / 分析${analysis.pending + analysis.retrying + analysis.processing}件`);
+    }
+
+    const runFinished = run !== null && ["completed", "partially_completed", "failed", "cancelled"].includes(run.status);
+    if (runFinished && waiting === 0) break;
+    // ジョブが残っているのに1件も進まなくなった場合は、取り残しを報告して抜ける
+    if (stats.stoppedReason === "empty" && stats.discoverySteps === 0 && stats.crawlJobs === 0 && stats.analysisJobs === 0) {
+      if (waiting > 0) console.log(`[discovery] ⚠️ 進行しないジョブが ${waiting} 件残っています（処理を打ち切ります）`);
+      break;
+    }
   }
 
   const run = await getDiscoveryRun(db, runId);

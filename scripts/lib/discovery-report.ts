@@ -192,6 +192,10 @@ export async function printCompanyMetrics(db: Db, candidates: DiscoveryCandidate
       return { ...acc, [k]: (acc[k] ?? 0) + 1 };
     }, {});
     console.log(`  未分析 ${notAnalyzed.length}社のクロール状態: ${Object.entries(byCrawl).map(([k, v]) => `${k}=${v}`).join(" / ")}`);
+    if (byCrawl.not_crawled) {
+      console.log(`    ※ not_crawled はクロール失敗ではなく「ジョブ未処理」です。`);
+      console.log(`      npm run jobs:run で残りを処理してから npm run discovery:verify で再確認できます`);
+    }
     const failures = notAnalyzed
       .map((d) => ({ name: d.company.company_name, error: d.crawlJobs.find((j) => j.error)?.error ?? null }))
       .filter((f) => f.error);
