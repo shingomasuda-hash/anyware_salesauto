@@ -204,3 +204,39 @@ describe("50社検証で残った見出しノイズ", () => {
     expect(isPlausibleCompany(candidate("Naniwa Precision Works"))).toBe(true);
   });
 });
+
+describe("兵庫県の検証で出た見出しノイズ", () => {
+  const rejected = [
+    // 業界団体（組合・協会）
+    "兵庫県電機商業組合",
+    "兵庫県自動車部品商組合",
+    // 一般名詞だけ
+    "電力会社",
+    "製造会社",
+    "マーケット",
+    // 記事タイトル
+    "電力会社:電気&電気ガスセットおすすめランキング",
+    "でんきのこと",
+    "会社案内",
+  ];
+  for (const name of rejected) {
+    it(`除外する: ${name}`, () => {
+      expect(isPlausibleCompany(candidate(cleanCompanyName(name)))).toBe(false);
+    });
+  }
+
+  it("鉤括弧と末尾の「へ」を落とす", () => {
+    expect(cleanCompanyName("「光電気工業」へ")).toBe("光電気工業");
+    expect(cleanCompanyName("栗本加工へ")).toBe("栗本加工");
+  });
+
+  it("末尾の記号・絵文字を落とす", () => {
+    expect(cleanCompanyName("株式会社巴商会-")).toBe("株式会社巴商会");
+  });
+
+  it("兵庫県で実在した企業は通す", () => {
+    for (const name of ["兵庫小川製作所", "東正工業", "大日製作所", "誠金属工業", "浜野鉄工", "大伸ダイス工業", "明石機械工業", "東洋電気工事", "光電気工業", "巴商会", "兵庫商会", "豊岡部品センター"]) {
+      expect(isPlausibleCompany(candidate(cleanCompanyName(name)))).toBe(true);
+    }
+  });
+});

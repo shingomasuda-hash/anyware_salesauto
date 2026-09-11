@@ -50,7 +50,7 @@ const TRAILING_PARTICLE = /^(です|でした|ます|ました|だ|である|へ
  * 検索結果タイトルに付く説明的な語尾（社名の一部ではない）。
  * 「とは」は記事タイトルの目印として isPlausibleCompany 側で使うため、ここでは除去しない。
  */
-const DESCRIPTIVE_SUFFIX = /\s*(の)?(求人情報|求人|会社概要|企業情報|公式サイト|公式ホームページ|ホームページ|採用情報|採用|事業内容|口コミ|評判)\s*$/;
+const DESCRIPTIVE_SUFFIX = /\s*(の)?(求人情報|求人|会社概要|会社案内|会社紹介|企業情報|企業案内|公式サイト|公式ホームページ|ホームページ|採用情報|採用|事業内容|口コミ|評判)\s*$/;
 
 /** 「株式会社山田製作所の求人情報」→「株式会社山田製作所」 */
 function stripDescriptiveSuffix(value: string): string {
@@ -77,6 +77,29 @@ function trimLeadingDescription(part: string): string {
   return rest.length >= 2 ? rest : part;
 }
 
+/**
+ * 検索結果タイトルの装飾を落とす。
+ * 「「光電気工業」へ」「株式会社巴商会-」のように、鉤括弧・末尾の助詞・絵文字が付く。
+ *
+ * 落とす助詞は「へ」だけにする。「は」「と」まで落とすと
+ * 「金属加工とは」のような記事タイトルが社名として通ってしまう。
+ */
+const TITLE_TRAILING_PARTICLE = /へ$/;
+function stripTitleDecoration(value: string): string {
+  let out = value.trim();
+  // 絵文字・記号（「…ランキング💡」）
+  out = out.replace(/[\p{Extended_Pictographic}\u2190-\u21ff\u2300-\u23ff\u25a0-\u27bf\ufe0f]+/gu, "").trim();
+  // 鉤括弧・末尾記号・助詞は互いに入れ子になる（「「光電気工業」へ」）ので、変化しなくなるまで繰り返す
+  for (let i = 0; i < 3; i++) {
+    const before = out;
+    out = out.replace(/^[「『"']+/, "").replace(/[」』"']+$/, "").trim();
+    out = out.replace(/[-–—ー]+$/, "").trim();
+    if (out.length >= 4) out = out.replace(TITLE_TRAILING_PARTICLE, "").trim();
+    if (out === before) break;
+  }
+  return out;
+}
+
 /** 抽出した社名として成立するか（法人格だけ・記号だけを弾く） */
 function isUsableNamePart(part: string): boolean {
   const core = part.replace(new RegExp(LEGAL_FORMS, "g"), "").replace(/[.．…・\-—–_~"']/g, "").trim();
@@ -91,7 +114,7 @@ function isUsableNamePart(part: string): boolean {
  * 法人格（株式会社等）を手がかりに社名部分だけを抽出する。
  */
 export function cleanCompanyName(raw: string): string {
-  const name = toHalfWidth(raw).trim();
+  const name = stripTitleDecoration(toHalfWidth(raw));
 
   // 1) 法人格の直後に社名が続く形を優先（「…の株式会社トーシン」）
   const after = name.match(LEGAL_FORM_THEN_NAME);
@@ -111,7 +134,8 @@ export function cleanCompanyName(raw: string): string {
   }
 
   // 3) 法人格が無い場合は区切りの前半を採用する
-  let fallback = name.split(/\s*[|｜/／–—<>＞]\s*/)[0].trim();
+  // 「電力会社:電気料金の比較」のように : も区切りとして扱う
+  let fallback = name.split(/\s*[|｜/／–—<>＞:：]\s*/)[0].trim();
   fallback = fallback.replace(/\s*[[【(（].*$/, "").trim();
   // 「アルミ加工・精密加工・微細加工の中田製作所」→「中田製作所」
   fallback = trimLeadingDescription(stripDescriptiveSuffix(fallback));
@@ -152,14 +176,14 @@ export function toCandidate(input: RawCandidateInput): DiscoveryCandidate {
  * 例:「電気機器」「切削加工品」「強み」（検索結果の見出しが社名として拾われたもの）
  */
 const GENERIC_TERM =
-  "電気|電子|電機|機械|機器|金属|精密|樹脂|プラスチック|ゴム|化学|化成|薬品|鉄|鋼|鉄鋼|アルミ|ステンレス|銅|切削|研削|研磨|溶接|板金|鋳造|鍛造|プレス|成形|射出成形|表面処理|熱処理|めっき|メッキ|塗装|組立|加工|製造|生産|製品|部品|装置|設備|材料|素材|工業|産業|工場|技術|品|類|業|強み|特徴|メリット|デメリット|事例|実績|価格|費用|料金|納期|種類|方法|一覧|情報|紹介";
+  "会社|電力|ガス|水道|市場|マーケット|電気|電子|電機|機械|機器|金属|精密|樹脂|プラスチック|ゴム|化学|化成|薬品|鉄|鋼|鉄鋼|アルミ|ステンレス|銅|切削|研削|研磨|溶接|板金|鋳造|鍛造|プレス|成形|射出成形|表面処理|熱処理|めっき|メッキ|塗装|組立|加工|製造|生産|製品|部品|装置|設備|材料|素材|工業|産業|工場|技術|品|類|業|強み|特徴|メリット|デメリット|事例|実績|価格|費用|料金|納期|種類|方法|一覧|情報|紹介";
 const GENERIC_ONLY_NAME = new RegExp(`^(?:${GENERIC_TERM})+$`);
 
 /**
  * 業界団体・協同組合。製造業の営業先ではないため候補にしない。
  * 「大阪化学工業薬品協会INDEX」「大阪府電気工事工業組合」のような一覧ページを弾く。
  */
-const INDUSTRY_BODY = /(協会|工業会|商工会|商工会議所|連合会|振興会|協議会|コミッティ|工業組合|協同組合|事業協同組合|同業会)/;
+const INDUSTRY_BODY = /(協会|工業会|商工会|商工会議所|連合会|振興会|協議会|コミッティ|組合|同業会)/;
 
 /** 日本語（かな・漢字）を含むか */
 const HAS_JAPANESE = /[ぁ-んァ-ヶ一-龠]/;
@@ -167,7 +191,9 @@ const HAS_JAPANESE = /[ぁ-んァ-ヶ一-龠]/;
 /** 記事・一覧ページのタイトルに現れる語（企業名ではない） */
 const NON_COMPANY_PATTERNS: RegExp[] = [
   /^(求人|採用|一覧|ランキング|まとめ|比較|おすすめ|検索結果|地域で検索)/,
-  /(とは|の方法|について|ガイド|コラム|ニュース)$/,
+  /(とは|の方法|のこと|の話|について|ガイド|コラム|ニュース)$/,
+  // 「電力会社:電気&ガスセットおすすめランキング」のように語中に現れる記事表現
+  /ランキング/,
   // 「大阪府の金属加工の会社104社」「工場 [3社]」など件数を含む一覧ページ
   /\d+\s*社/,
   // 「○○の一覧」「○○業者」「○○を探す」

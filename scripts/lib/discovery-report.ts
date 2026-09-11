@@ -166,11 +166,21 @@ function printAggregates(
     return signals.some((s) => s.key === "website_name" && s.matched);
   });
   console.log(`公式HP正解率(代理)  : ${pct(nameMatched.length, withSite.length)}  ← サイト本文/タイトルに会社名が現れた割合`);
+
+  // 実際に営業リストへ載るのは verified の企業だけ。未登録の候補と混ぜると精度を読み違える
+  const registeredWithSite = withSite.filter((c) => c.status === "verified");
+  const registeredMatched = registeredWithSite.filter((c) => nameMatched.includes(c));
+  console.log(`  うち企業登録された分: ${pct(registeredMatched.length, registeredWithSite.length)}  ← 実際に営業リストへ載る企業だけの精度`);
   console.log("  ※ 真の正解率は自動判定できません。下記「要目視確認」の企業を人が確認してください。");
+
   const suspicious = withSite.filter((c) => !nameMatched.includes(c));
+  const suspiciousRegistered = suspicious.filter((c) => c.status === "verified");
   if (suspicious.length > 0) {
-    console.log(`  要目視確認 ${suspicious.length}件:`);
-    for (const c of suspicious.slice(0, 20)) console.log(`    - ${c.name} → ${c.website}（conf ${c.official_site_confidence ?? "—"}）`);
+    console.log(`  要目視確認 ${suspicious.length}件（うち企業登録済み ${suspiciousRegistered.length}件 ← こちらを優先して確認）:`);
+    for (const c of [...suspiciousRegistered, ...suspicious.filter((c) => c.status !== "verified")].slice(0, 20)) {
+      const mark = c.status === "verified" ? "★" : " ";
+      console.log(`    ${mark} ${c.name} → ${c.website}（conf ${c.official_site_confidence ?? "—"} / ${VERDICT_LABEL[c.status] ?? c.status}）`);
+    }
   }
 
   // クロール以降の指標は、企業登録された候補が母数
