@@ -62,6 +62,8 @@ export function scaleBudgetForRequest(budget: DiscoveryBudget, requestedCount: n
     ...budget,
     maxProviderRequests: Math.min(budget.maxProviderRequests, 8 * scale),
     maxCandidates: Math.min(budget.maxCandidates, Math.max(40, requestedCount * 4)),
-    maxVerificationRequests: Math.min(budget.maxVerificationRequests, Math.max(20, requestedCount * 3)),
+    // 候補1件あたり「公式サイト検索1回 + ページ取得最大3回」かかるうえ、
+    // 目標の数倍の候補を検証するため、検証リクエストは多めに確保する
+    maxVerificationRequests: Math.min(budget.maxVerificationRequests, Math.max(40, requestedCount * 12)),
   };
 }

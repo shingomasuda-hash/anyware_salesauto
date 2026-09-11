@@ -104,3 +104,21 @@ describe("社名を途中で切らない", () => {
     expect(cleanCompanyName("大阪の金属加工なら山田製作所株式会社です")).not.toBe("株式会社です");
   });
 });
+
+describe("2回目の実データ検証で判明した社名の誤抽出", () => {
+  it("社名の前に付く説明句を落とす", () => {
+    expect(cleanCompanyName("大阪の加工業ならイトウ精工株式会社")).toBe("イトウ精工株式会社");
+    expect(cleanCompanyName("アルミ加工・精密加工・微細加工の中田製作所")).toBe("中田製作所");
+    expect(cleanCompanyName("金属から樹脂まで高精度精密機械加工技術の河内金属製作所")).toBe("河内金属製作所");
+  });
+
+  it("法人格の直前が助詞で終わるものは企業名として扱わない", () => {
+    const n = cleanCompanyName("ステンレスなどの金属加工をお探しなら株式会社");
+    expect(isPlausibleCompany(candidate(n))).toBe(false);
+  });
+
+  it("短い社名に「の」が含まれていても壊さない", () => {
+    expect(cleanCompanyName("たけのこ製作所")).toBe("たけのこ製作所");
+    expect(cleanCompanyName("株式会社きのこ")).toBe("株式会社きのこ");
+  });
+});

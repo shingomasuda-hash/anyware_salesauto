@@ -63,6 +63,20 @@ function stripDescriptiveSuffix(value: string): string {
   return out;
 }
 
+/**
+ * 社名の前に付く説明句を落とす。
+ * 「大阪の加工業ならイトウ精工株式会社」→「イトウ精工株式会社」
+ * 社名そのものに「の」を含む場合を壊さないよう、説明句とみなせる長さのときだけ適用する。
+ */
+const DESCRIPTION_BOUNDARY = /^.*(?:なら|ならば|における|にある|にて|をお探しの?|の)/;
+function trimLeadingDescription(part: string): string {
+  if (part.length < 8) return part;
+  const m = part.match(DESCRIPTION_BOUNDARY);
+  if (!m) return part;
+  const rest = part.slice(m[0].length).trim();
+  return rest.length >= 2 ? rest : part;
+}
+
 /** 抽出した社名として成立するか（法人格だけ・記号だけを弾く） */
 function isUsableNamePart(part: string): boolean {
   const core = part.replace(new RegExp(LEGAL_FORMS, "g"), "").replace(/[.．…・\-—–_~"']/g, "").trim();
@@ -89,6 +103,9 @@ export function cleanCompanyName(raw: string): string {
   // 2) 法人格の直前に社名がある形（「大一精工株式会社」）
   const before = name.match(NAME_THEN_LEGAL_FORM);
   if (before && isUsableNamePart(before[1])) {
+    before[1] = trimLeadingDescription(before[1]);
+  }
+  if (before && isUsableNamePart(before[1])) {
     // 社名内部のスペースは保持し、連続した空白だけを整理する
     return stripDescriptiveSuffix(`${before[1].trim()}${before[2]}`.replace(/\s{2,}/g, " "));
   }
@@ -96,7 +113,9 @@ export function cleanCompanyName(raw: string): string {
   // 3) 法人格が無い場合は区切りの前半を採用する
   let fallback = name.split(/\s*[|｜/／–—<>＞]\s*/)[0].trim();
   fallback = fallback.replace(/\s*[[【(（].*$/, "").trim();
-  return stripDescriptiveSuffix(fallback).replace(/\s{2,}/g, " ");
+  // 「アルミ加工・精密加工・微細加工の中田製作所」→「中田製作所」
+  fallback = trimLeadingDescription(stripDescriptiveSuffix(fallback));
+  return fallback.replace(/\s{2,}/g, " ");
 }
 
 /**
@@ -152,7 +171,12 @@ export function isPlausibleCompany(candidate: DiscoveryCandidate): boolean {
 
   // 法人格を含むものは企業名とみなす（cleanCompanyName で抽出済み）
   const hasLegalForm = /(株式会社|有限会社|合同会社|合資会社|合名会社)/.test(n);
-  if (hasLegalForm) return n.length <= 60;
+  if (hasLegalForm) {
+    // 「…をお探しなら株式会社」のように法人格の直前が助詞で終わるものは社名ではない
+    if (/(なら|ならば|をお探し|お探し|など|ください|は|を|が|へ|と|より)(株式会社|有限会社|合同会社|合資会社|合名会社)$/.test(n)) return false;
+    return n.length <= 60;
+  }
+
 
   // 公的機関は営業対象にならない
   if (/(財産区|検察審査会|裁判所|役所|市役所|町役場|村役場|議会|委員会)$/.test(n)) return false;

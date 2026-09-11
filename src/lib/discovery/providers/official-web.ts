@@ -4,6 +4,7 @@ import { decideOfficialSite, isNonOfficialDomain, type OfficialSiteCandidate } f
 import { extractHtml } from "@/lib/crawler/extract";
 import { fetchHtml } from "@/lib/integrations/http/fetch";
 import { toCandidate } from "../normalizer";
+import { getSearchEngine } from "./web-search";
 import type { CompanyDiscoveryProvider, DiscoveryCandidate, DiscoveryContext, DiscoveryQuery, MergedCandidate } from "../types";
 
 export interface OfficialSiteCheck {
@@ -53,15 +54,52 @@ export class OfficialWebProvider implements CompanyDiscoveryProvider {
   }
 
   /** 公式サイト候補を取得して照合する。取得した本文は verification に再利用する */
+  /**
+   * 社名しか分からない企業の公式サイトを Web 検索で探す。
+   *
+   * GビズINFO は URL を持たない法人が大半のため、候補URLが無いという理由だけで
+   * 実在の企業を落とさないようにする。見つけた URL は無条件に採用せず、
+   * 通常どおり decideOfficialSite で会社名・所在地・電話を照合する。
+   */
+  private async searchWebsiteCandidates(candidate: MergedCandidate, context: DiscoveryContext): Promise<string[]> {
+    const engine = getSearchEngine();
+    if (!engine.isAvailable()) return [];
+    if (!context.budget.canVerificationRequest()) return [];
+    context.budget.consumeVerificationRequest();
+
+    const area = [candidate.prefecture, candidate.city].filter(Boolean).join(" ");
+    const query = [candidate.name, area, "公式"].filter(Boolean).join(" ").slice(0, 100);
+    try {
+      const results = await engine.search(query, 5);
+      return Array.from(
+        new Set(
+          results
+            .map((r) => normalizeUrl(r.url))
+            .filter((u): u is string => Boolean(u))
+            .filter((u) => !isNonOfficialDomain(extractDomain(u))),
+        ),
+      );
+    } catch (err) {
+      await context.log("warn", "公式サイトの検索に失敗しました", {
+        candidate: candidate.name,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return [];
+    }
+  }
+
   async checkOfficialSite(candidate: MergedCandidate, context: DiscoveryContext): Promise<OfficialSiteCheck> {
-    const urls = Array.from(
+    const known = Array.from(
       new Set(
         candidate.observations
           .map((o) => normalizeUrl(o.website))
           .filter((u): u is string => Boolean(u))
           .filter((u) => !isNonOfficialDomain(extractDomain(u))),
       ),
-    ).slice(0, 3);
+    );
+
+    // 候補URLが無い場合のみ Web 検索で探す（既に分かっていれば余計なリクエストをしない）
+    const urls = (known.length > 0 ? known : await this.searchWebsiteCandidates(candidate, context)).slice(0, 3);
 
     if (urls.length === 0) {
       return { url: null, domain: null, confidence: null, title: null, text: null, status: "no_website", reasons: ["公式サイト候補が見つかりません"] };
@@ -78,6 +116,7 @@ export class OfficialWebProvider implements CompanyDiscoveryProvider {
         continue;
       }
       const extracted = extractHtml(res.body, res.finalUrl, 8000);
+      // 検索で見つけた URL は観測に含まれないため、その場合は "search" 扱いにする
       const source = candidate.observations.find((o) => normalizeUrl(o.website) === url)?.source;
       fetched.push({
         url: normalizeUrl(res.finalUrl) ?? url,
