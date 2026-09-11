@@ -57,10 +57,11 @@ export function getDiscoveryConfig() {
 
 /** budget を Run ごとにスケールさせる（少数件の探索で上限まで使い切らない） */
 export function scaleBudgetForRequest(budget: DiscoveryBudget, requestedCount: number): DiscoveryBudget {
-  const scale = Math.max(1, Math.ceil(requestedCount / 20));
   return {
     ...budget,
-    maxProviderRequests: Math.min(budget.maxProviderRequests, 8 * scale),
+    // 候補の多くは本人確認で落ちるため目標の数倍を発見する必要がある。
+    // Provider 呼び出し上限が小さいと、目標に届く前に発見フェーズが打ち切られる。
+    maxProviderRequests: Math.min(budget.maxProviderRequests, Math.max(12, Math.ceil(requestedCount * 0.8))),
     maxCandidates: Math.min(budget.maxCandidates, Math.max(40, requestedCount * 4)),
     // 候補1件あたり「公式サイト検索1回 + ページ取得最大3回」かかるうえ、
     // 目標の数倍の候補を検証するため、検証リクエストは多めに確保する

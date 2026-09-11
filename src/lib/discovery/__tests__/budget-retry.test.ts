@@ -136,3 +136,35 @@ describe("withRetry", () => {
     expect(fn).toHaveBeenCalledTimes(3);
   });
 });
+
+describe("目標件数に応じた上限のスケール", () => {
+  const base: DiscoveryBudget = {
+    maxProviderRequests: 60,
+    maxCandidates: 600,
+    maxVerificationRequests: 300,
+    maxCrawlPages: 20,
+    maxAiCalls: 200,
+    maxExecutionMinutes: 60,
+  };
+
+  it("目標の4倍の候補を発見できるだけの Provider 呼び出しを確保する", () => {
+    // 実データ検証で、候補80件を目標としながら8回で打ち切られ発見が不足した
+    for (const requested of [20, 50, 100]) {
+      const scaled = scaleBudgetForRequest(base, requested);
+      expect(scaled.maxProviderRequests).toBeGreaterThanOrEqual(Math.min(60, requested * 0.8));
+      expect(scaled.maxCandidates).toBeGreaterThanOrEqual(Math.min(600, requested * 4));
+    }
+  });
+
+  it("候補1件あたりの検証リクエスト（検索1回＋取得最大3回）を賄える", () => {
+    const scaled = scaleBudgetForRequest(base, 20);
+    expect(scaled.maxVerificationRequests).toBeGreaterThanOrEqual(20 * 4);
+  });
+
+  it("環境変数で定めた上限は超えない", () => {
+    const scaled = scaleBudgetForRequest(base, 1000);
+    expect(scaled.maxProviderRequests).toBeLessThanOrEqual(base.maxProviderRequests);
+    expect(scaled.maxCandidates).toBeLessThanOrEqual(base.maxCandidates);
+    expect(scaled.maxVerificationRequests).toBeLessThanOrEqual(base.maxVerificationRequests);
+  });
+});
