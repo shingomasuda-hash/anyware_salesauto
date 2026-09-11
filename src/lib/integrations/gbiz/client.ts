@@ -24,6 +24,8 @@ export class GbizClient implements GbizProvider {
       signal: AbortSignal.timeout(20_000),
     });
     if (res.status === 429) throw new Error("GビズINFO: レート制限 (429)。しばらく待って再試行してください");
+    // GビズINFO は「該当なし」を 404 で返す。エラーではないので空の結果として扱う
+    if (res.status === 404) return { "hojin-infos": [], totalCount: 0, totalPage: 0, pageNumber: 1 };
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new Error(`GビズINFO API エラー: HTTP ${res.status} ${text.slice(0, 200)}`);
@@ -36,7 +38,8 @@ export class GbizClient implements GbizProvider {
       page,
       limit,
       prefecture: prefectureCode(conditions.prefecture),
-      name: conditions.keyword?.trim() || undefined,
+      // GビズINFO の name は50文字以内。検索結果タイトル等をそのまま渡すと 400 になる
+      name: conditions.keyword?.trim().slice(0, 50) || undefined,
       employee_number_from: conditions.employeeMin,
       employee_number_to: conditions.employeeMax,
       corporate_type: conditions.corporateType ? CORPORATE_TYPES.find((c) => c.code === conditions.corporateType)?.code : undefined,

@@ -1,5 +1,5 @@
 import { getDiscoveryConfig } from "@/lib/config/discovery";
-import { generateDirectoryTerms, generateSearchTerms } from "./query-generator";
+import { generateDirectoryTerms, generateGbizNameKeywords, generateSearchTerms } from "./query-generator";
 import { buildShards, citiesFor } from "./query-sharding";
 import type { CompanyDiscoveryProvider, DiscoveryCriteria, DiscoveryProviderName, DiscoveryQuery } from "./types";
 
@@ -21,13 +21,24 @@ export function planQueries(criteria: DiscoveryCriteria, providers: CompanyDisco
 
   const perProvider: Record<string, Omit<DiscoveryQuery, "id">[]> = { gbiz: [], google_places: [], web_search: [], edinet: [] };
 
-  // 1. GビズINFO: 公的情報の土台（法人番号つきの候補）。シャード × ページで分割する
+  // 1. GビズINFO: 公的情報の土台（法人番号つきの候補）。
+  // 都道府県だけで引くと法人番号順に公的機関（財産区・裁判所等）が並ぶため、
+  // 「法人名に現れやすい語」を必ず添えて事業会社を狙う。
   if (names.includes("gbiz")) {
+    const nameKeywords = generateGbizNameKeywords(criteria, Math.min(2 * scale, 8));
     const gbizShards = shards.length > 0 ? shards : [{ label: criteria.prefecture ?? "全国" }];
-    const pagesPerShard = Math.max(1, Math.ceil(criteria.maxResults / (gbizShards.length * cfg.perQueryLimit)));
-    for (let page = 1; page <= pagesPerShard; page++) {
+    const pagesPerShard = Math.max(1, Math.ceil(criteria.maxResults / (nameKeywords.length * cfg.perQueryLimit)) || 1);
+
+    if (nameKeywords.length === 0) {
+      // 業種未指定など、名前で絞れない場合のみ従来どおり地域シャードで引く
       for (const shard of gbizShards) {
-        perProvider.gbiz.push({ provider: "gbiz", criteria, shard, page, limit: cfg.perQueryLimit });
+        perProvider.gbiz.push({ provider: "gbiz", criteria, shard, page: 1, limit: cfg.perQueryLimit });
+      }
+    } else {
+      for (let page = 1; page <= pagesPerShard; page++) {
+        for (const text of nameKeywords) {
+          perProvider.gbiz.push({ provider: "gbiz", criteria, text, page, limit: cfg.perQueryLimit });
+        }
       }
     }
   }
@@ -94,7 +105,9 @@ export function planFallbackQueries(
   const extraTerms = generateSearchTerms(criteria, 12).slice(-6);
 
   if (names.includes("gbiz")) {
-    for (const shard of extraShards) push({ provider: "gbiz", criteria, shard, page: 2, limit: cfg.perQueryLimit });
+    const extraNames = generateGbizNameKeywords(criteria, 8).slice(-4);
+    for (const text of extraNames) push({ provider: "gbiz", criteria, text, page: 2, limit: cfg.perQueryLimit });
+    for (const shard of extraShards.slice(0, 2)) push({ provider: "gbiz", criteria, shard, page: 2, limit: cfg.perQueryLimit });
   }
   if (names.includes("web_search")) {
     for (const text of extraTerms) push({ provider: "web_search", criteria, text, limit: 20 });

@@ -62,7 +62,35 @@ export function inferIndustryKey(h: GbizHojin): string | undefined {
 }
 
 /** API で絞れない条件（業種 / 市区町村 / 従業員数）をローカルで判定 */
+/**
+ * 法人番号は取得できるが営業対象になり得ない組織。
+ * GビズINFO は法人番号順に返すため、絞り込まないと先頭が公的機関で埋まる。
+ */
+const PUBLIC_ENTITY_PATTERNS = [
+  /財産区$/,
+  /検察審査会$/,
+  /裁判所$/,
+  /(法務|税務|労働|運輸|気象|検疫|森林|河川|港湾)局$/,
+  /^(国|地方)/,
+  /(都道府県|市|区|町|村)役所$/,
+  /(議会|教育委員会|選挙管理委員会|人事委員会|監査委員)$/,
+  /(公安委員会|警察署|消防署|保健所)$/,
+  /(独立行政法人|国立大学法人|公立大学法人|地方独立行政法人)/,
+  /(土地改良区|water|水利組合)/,
+  /(共済組合|健康保険組合|国民健康保険団体連合会)$/,
+  /(社会福祉協議会|商工会議所|商工会)$/,
+];
+
+/** 営業対象になり得ない組織か（法人名から判定） */
+export function isPublicEntity(name: string | null | undefined): boolean {
+  const n = (name ?? "").trim();
+  if (!n) return false;
+  return PUBLIC_ENTITY_PATTERNS.some((re) => re.test(n));
+}
+
 export function matchesConditions(h: GbizHojin, c: CompanySearchConditions): { ok: boolean; reason?: string } {
+  // 財産区・裁判所などの公的機関は営業対象にならないため、業種判定より前に除外する
+  if (isPublicEntity(h.name)) return { ok: false, reason: "公的機関のため対象外" };
   if (h.close_date || (h.status && h.status !== "101" && h.status !== "1")) {
     // status 101 = 登録（GビズINFO）。閉鎖法人は除外
     if (h.close_date) return { ok: false, reason: "閉鎖法人" };

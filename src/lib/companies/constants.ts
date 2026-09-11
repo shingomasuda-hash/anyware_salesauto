@@ -30,25 +30,31 @@ export interface IndustryDef {
   label: string;
   /** GビズINFO business_item 等に含まれる語 */
   gbizKeywords: string[];
+  /**
+   * 法人名そのものに現れやすい語。
+   * GビズINFO は業種で絞り込めないため、法人名の部分一致検索でこの語を使って
+   * 業種に近い法人を引き当てる（例: 製造業 →「製作所」「工業」）。
+   */
+  nameKeywords: string[];
 }
 
 export const INDUSTRIES: IndustryDef[] = [
-  { key: "manufacturing", label: "製造業", gbizKeywords: ["製造", "工業", "メーカー", "加工"] },
-  { key: "construction", label: "建設業", gbizKeywords: ["建設", "建築", "土木", "工務店", "設備工事", "電気工事"] },
-  { key: "it", label: "情報通信業", gbizKeywords: ["情報", "通信", "ソフトウェア", "システム", "IT", "インターネット"] },
-  { key: "wholesale_retail", label: "卸売業・小売業", gbizKeywords: ["卸売", "小売", "販売", "商事", "商店"] },
-  { key: "logistics", label: "運輸業・郵便業", gbizKeywords: ["運輸", "運送", "物流", "倉庫", "配送"] },
-  { key: "real_estate", label: "不動産業", gbizKeywords: ["不動産", "賃貸", "住宅"] },
-  { key: "food_service", label: "宿泊業・飲食サービス業", gbizKeywords: ["飲食", "レストラン", "ホテル", "宿泊", "フード"] },
-  { key: "medical_welfare", label: "医療・福祉", gbizKeywords: ["医療", "福祉", "介護", "クリニック", "病院", "薬局"] },
-  { key: "education", label: "教育・学習支援業", gbizKeywords: ["教育", "学習", "スクール", "塾"] },
-  { key: "professional", label: "学術研究・専門サービス業", gbizKeywords: ["コンサル", "会計", "税理士", "法律", "設計", "デザイン", "広告"] },
-  { key: "services", label: "サービス業（その他）", gbizKeywords: ["サービス", "人材", "清掃", "警備", "整備"] },
-  { key: "finance", label: "金融業・保険業", gbizKeywords: ["金融", "保険", "信用"] },
-  { key: "agriculture", label: "農業・林業・漁業", gbizKeywords: ["農業", "農園", "林業", "漁業", "水産"] },
-  { key: "energy", label: "電気・ガス・熱供給・水道業", gbizKeywords: ["電力", "ガス", "エネルギー", "水道"] },
-  { key: "lifestyle", label: "生活関連サービス業・娯楽業", gbizKeywords: ["美容", "理容", "エステ", "フィットネス", "娯楽", "旅行"] },
-  { key: "other", label: "その他", gbizKeywords: [] },
+  { key: "manufacturing", label: "製造業", gbizKeywords: ["製造", "工業", "メーカー", "加工"], nameKeywords: ["製作所", "工業", "精機", "鉄工", "金属", "製造", "樹脂", "化成", "電機", "工機"] },
+  { key: "construction", label: "建設業", gbizKeywords: ["建設", "建築", "土木", "工務店", "設備工事", "電気工事"], nameKeywords: ["建設", "工務店", "建築", "土木", "設備", "電気工事", "塗装"] },
+  { key: "it", label: "情報通信業", gbizKeywords: ["情報", "通信", "ソフトウェア", "システム", "IT", "インターネット"], nameKeywords: ["システム", "ソフト", "情報", "テクノロジ", "ネット", "データ"] },
+  { key: "wholesale_retail", label: "卸売業・小売業", gbizKeywords: ["卸売", "小売", "販売", "商事", "商店"], nameKeywords: ["商事", "商会", "物産", "販売", "商店", "流通"] },
+  { key: "logistics", label: "運輸業・郵便業", gbizKeywords: ["運輸", "運送", "物流", "倉庫", "配送"], nameKeywords: ["運輸", "運送", "物流", "倉庫", "急便"] },
+  { key: "real_estate", label: "不動産業", gbizKeywords: ["不動産", "賃貸", "住宅"], nameKeywords: ["不動産", "地所", "住宅", "ハウス", "建物"] },
+  { key: "food_service", label: "宿泊業・飲食サービス業", gbizKeywords: ["飲食", "レストラン", "ホテル", "宿泊", "フード"], nameKeywords: ["フード", "食品", "飲食", "レストラン", "ホテル"] },
+  { key: "medical_welfare", label: "医療・福祉", gbizKeywords: ["医療", "福祉", "介護", "クリニック", "病院", "薬局"], nameKeywords: ["医療", "介護", "福祉", "薬局", "ケア"] },
+  { key: "education", label: "教育・学習支援業", gbizKeywords: ["教育", "学習", "スクール", "塾"], nameKeywords: ["学園", "教育", "スクール", "ゼミ", "学院"] },
+  { key: "professional", label: "学術研究・専門サービス業", gbizKeywords: ["コンサル", "会計", "税理士", "法律", "設計", "デザイン", "広告"], nameKeywords: ["設計", "コンサル", "会計", "事務所", "デザイン", "広告"] },
+  { key: "services", label: "サービス業（その他）", gbizKeywords: ["サービス", "人材", "清掃", "警備", "整備"], nameKeywords: ["サービス", "人材", "清掃", "警備", "メンテナンス"] },
+  { key: "finance", label: "金融業・保険業", gbizKeywords: ["金融", "保険", "信用"], nameKeywords: ["信用", "保険", "ファイナンス", "キャピタル"] },
+  { key: "agriculture", label: "農業・林業・漁業", gbizKeywords: ["農業", "農園", "林業", "漁業", "水産"], nameKeywords: ["農園", "農産", "水産", "林業", "牧場"] },
+  { key: "energy", label: "電気・ガス・熱供給・水道業", gbizKeywords: ["電力", "ガス", "エネルギー", "水道"], nameKeywords: ["電力", "ガス", "エネルギー", "水道"] },
+  { key: "lifestyle", label: "生活関連サービス業・娯楽業", gbizKeywords: ["美容", "理容", "エステ", "フィットネス", "娯楽", "旅行"], nameKeywords: ["美容", "理容", "スポーツ", "旅行", "レジャー"] },
+  { key: "other", label: "その他", gbizKeywords: [], nameKeywords: [] },
 ];
 
 export function industryLabel(key: string | null | undefined): string | undefined {

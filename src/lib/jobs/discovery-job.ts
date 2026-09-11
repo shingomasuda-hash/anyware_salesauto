@@ -36,6 +36,11 @@ import type { StepOutcome } from "./search-job";
 const VERIFY_BATCH = 8;
 /** 1 ステップで昇格させる候補数 */
 const PROMOTE_BATCH = 15;
+/**
+ * 目標件数の何倍まで候補を発見してから検証に進むか。
+ * 実データ検証では候補の大半が本人確認で落ちたため、目標と同数では登録数が足りない。
+ */
+const DISCOVERY_OVERSHOOT = 4;
 
 interface DiscoveryCursor {
   /** 実行済みクエリ数（planQueries の並び順に対応） */
@@ -183,7 +188,9 @@ async function runDiscoveringPhase(
   });
 
   const exhausted = context.budget.exhaustedReason();
-  const enough = discovered >= run.requested_count;
+  // 候補の多くは本人確認で落ちるため、目標と同数しか発見しないと登録数がゼロになる。
+  // 目標の DISCOVERY_OVERSHOOT 倍まで発見してから検証フェーズへ進む。
+  const enough = discovered >= run.requested_count * DISCOVERY_OVERSHOOT;
   if (exhausted || enough) {
     if (exhausted) await logger.warn("探索の予算に達したため発見フェーズを終了", { reason: exhausted });
     await updateDiscoveryRun(db, run.id, { phase: "verifying", provider_stats: stats as unknown as Json });
@@ -370,6 +377,13 @@ async function verifyOne(
     domain: merged.domain,
     corporate_number: merged.corporateNumber,
     sources: merged.sources,
+    // enrich（GビズINFO 照会）で補完した所在地・電話も保存する。
+    // 保存しないと「所在地が一致」「電話番号が一致」の加点が次回以降に効かない。
+    address: merged.address,
+    address_normalized: normalizeAddress(merged.address),
+    prefecture: merged.prefecture,
+    city: merged.city,
+    phone: merged.phone,
     reject_reason: verification.status === "rejected" ? `本人確認スコアが不足（${verification.score}点）: ${verification.unmatched.join(" / ")}` : null,
     raw_data: { observations: merged.observations, officialSite: { url: check.url, reasons: check.reasons } } as unknown as Json,
   });

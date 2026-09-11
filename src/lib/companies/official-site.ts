@@ -10,7 +10,15 @@ export const NON_OFFICIAL_DOMAINS: string[] = [
   "google.com", "goo.gl", "yahoo.co.jp", "tabelog.com", "hotpepper.jp", "ekiten.jp", "itp.ne.jp", "wikipedia.org",
   "amazon.co.jp", "rakuten.co.jp", "ameblo.jp", "note.com", "hatenablog.com", "wixsite.com", "jimdofree.com",
   "prtimes.jp", "nikkei.com", "openwork.jp", "vorkers.com", "en-hyouban.com", "jobtalk.jp", "kaisha-hyoban.com",
+  // 企業ディレクトリ / 発注マッチング / 業界ポータル（実データ検証で公式サイトと誤判定されたもの）
+  "metoree.com", "aperza.com", "bconnect.jp", "mitsu-ri.net", "proteg.jp", "hakenlist.com",
+  "monodzukuri.com", "kinzoku-kakou.net", "imitsu.jp", "ipros.jp", "ipros.com", "nc-net.or.jp",
+  "tsukuruo.jp", "meviy.misumi-ec.com", "misumi-ec.com", "monotaro.com", "zenrin.co.jp",
+  "job-medley.com", "kyujin-box.com", "shigoto.mhlw.go.jp", "jobcan.ne.jp",
 ];
+
+/** 自治体・官公庁のドメイン（公式サイト候補にしない） */
+const GOVERNMENT_DOMAIN_PATTERNS = [/\.lg\.jp$/, /\.go\.jp$/, /(^|\.)city\.[^.]+\.jp$/, /(^|\.)pref\.[^.]+\.jp$/];
 
 export interface OfficialSiteCandidate {
   url: string;
@@ -42,6 +50,7 @@ export const OFFICIAL_SITE_THRESHOLD = 60;
 
 export function isNonOfficialDomain(domain: string | null): boolean {
   if (!domain) return true;
+  if (GOVERNMENT_DOMAIN_PATTERNS.some((re) => re.test(domain))) return true;
   return NON_OFFICIAL_DOMAINS.some((d) => domain === d || domain.endsWith(`.${d}`));
 }
 

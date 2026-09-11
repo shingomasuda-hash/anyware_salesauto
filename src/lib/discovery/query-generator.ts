@@ -57,3 +57,30 @@ export function generateDirectoryTerms(criteria: DiscoveryCriteria, maxTerms = 3
   if (!area) return [];
   return PUBLIC_DIRECTORY_HINTS.slice(0, maxTerms).map((hint) => [area, industryLabel, hint].filter(Boolean).join(" "));
 }
+
+/**
+ * GビズINFO の法人名検索に使う語を生成する。
+ *
+ * GビズINFO は業種で絞り込めず、結果は法人番号順に返るため、
+ * 条件を都道府県だけにすると先頭が財産区・裁判所などの公的機関で埋まる。
+ * 業種に対応する「法人名に現れやすい語」で引くことで、実在の事業会社を狙う。
+ */
+export function generateGbizNameKeywords(criteria: DiscoveryCriteria, maxTerms = 8): string[] {
+  const terms: string[] = [];
+  const push = (t: string) => {
+    const v = t.trim();
+    // GビズINFO の name は50文字以内
+    if (v && v.length <= 50 && !terms.includes(v)) terms.push(v);
+  };
+
+  // ユーザー指定キーワードが最優先（意図が最も明確）
+  for (const kw of criteria.keywords ?? []) push(kw);
+
+  // 業種詳細が指定されていればその語を優先する
+  const sub = findSubcategory(criteria.industry, criteria.industrySubcategory);
+  if (sub) for (const t of sub.searchTerms) push(t);
+
+  for (const k of INDUSTRIES.find((i) => i.key === criteria.industry)?.nameKeywords ?? []) push(k);
+
+  return terms.slice(0, maxTerms);
+}
