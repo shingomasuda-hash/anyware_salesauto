@@ -57,10 +57,19 @@ const SPECS: Spec[] = [
     fallback: "未設定でも既定の true で動作します",
   },
   {
-    name: "SALES_OFFERING_SUMMARY",
+    name: "SALES_OUTREACH_PURPOSE",
     need: "optional",
-    purpose: "自社サービスの内容。設定すると企業ごとの営業文を分析と同時に生成する",
-    fallback: "未設定のあいだは営業文を生成しません",
+    purpose: "文面の目的（interview=取材依頼 / proposal=サービス提案）",
+    expected: "interview",
+    showValue: true,
+    fallback: "未設定でも既定の interview（取材依頼）で動作します",
+  },
+  {
+    name: "SALES_INTERVIEW_TOPIC",
+    need: "optional",
+    purpose: "取材テーマ。設定すると企業ごとの取材依頼文を分析と同時に生成する",
+    showValue: true,
+    fallback: "未設定のあいだは文面を生成しません",
   },
   // Live Test を成立させるために併せて必要なもの
   { name: "NEON_AUTH_BASE_URL", need: "recommended", purpose: "管理画面のログイン" },

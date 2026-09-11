@@ -13,6 +13,8 @@ export type OutreachDecision = { ok: true; draft: OutreachDraft } | { ok: false;
 
 export interface OutreachContext {
   salesContactAllowed: "true" | "false" | "unknown";
+  /** 依頼内容が未設定だった場合に返す説明 */
+  missingReason?: string;
   /** 実際に確認できた連絡先。ここに無い宛先を文面に書かせない */
   knownEmails: (string | null | undefined)[];
   knownPhones: (string | null | undefined)[];
@@ -32,10 +34,12 @@ const PHONE_RE = /0\d{1,4}[-(\s]?\d{1,4}[-)\s]?\d{3,4}/g;
  */
 export function reviewOutreach(raw: CompanyAnalysisOutput["sales_outreach"], context: OutreachContext): OutreachDecision {
   if (context.salesContactAllowed === "false") {
-    return { ok: false, reason: "営業を断る表記が確認されたため営業文は作成しません" };
+    // 取材依頼でも、営業を断っている企業への一斉連絡は行わない。
+    // 「取材は可」と明記している企業を拾いたい場合は、この判定を緩める前に人が確認すること。
+    return { ok: false, reason: "営業を断る表記が確認されたため文面は作成しません" };
   }
   if (!raw) {
-    return { ok: false, reason: "自社サービスが未設定のため営業文は生成されていません（SALES_OFFERING_SUMMARY）" };
+    return { ok: false, reason: context.missingReason ?? "依頼内容が未設定のため文面は生成されていません" };
   }
   if (!raw.subject.trim() || !raw.body.trim()) {
     return { ok: false, reason: "件名または本文が空でした" };

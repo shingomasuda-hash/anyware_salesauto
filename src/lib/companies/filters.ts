@@ -42,7 +42,7 @@ export const companyFilterSchema = z.object({
   hasWebsite: flag,
   hasContact: flag,
   hasEmail: flag,
-  /** 営業文の下書きがある企業だけ（AI分析まで進んだ企業） */
+  /** 文面（取材依頼 / 営業）の下書きがある企業だけ（AI分析まで進んだ企業） */
   hasOutreach: flag,
   excludeRestricted: flag,
   unanalyzed: flag,

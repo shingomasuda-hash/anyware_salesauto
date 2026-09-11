@@ -41,17 +41,26 @@ const envSchema = z.object({
     .default("true")
     .transform((v) => v === "true"),
 
-  // --- 営業文の生成（自社が何を売るのか） ---
-  /** 差出人の会社名 */
+  // --- 企業ごとの文面（取材依頼 / サービス提案） ---
+  /** 何を依頼する文面か。既定は取材依頼 */
+  SALES_OUTREACH_PURPOSE: z.enum(["interview", "proposal"]).default("interview"),
+  /** 差出人 */
   SALES_SENDER_COMPANY: optionalString,
-  /** サービス名 */
+  SALES_SENDER_NAME: optionalString,
+  /** 依頼したい次の行動（未設定なら目的ごとの既定文を使う） */
+  SALES_OUTREACH_CTA: optionalString,
+  /** 取材依頼: 何について取材したいか。未設定なら生成しない */
+  SALES_INTERVIEW_TOPIC: optionalString,
+  /** 取材依頼: 掲載先・媒体 */
+  SALES_INTERVIEW_MEDIUM: optionalString,
+  /** 取材依頼: 形式・所要時間 */
+  SALES_INTERVIEW_FORMAT: optionalString,
+  /** サービス提案: サービス名 */
   SALES_OFFERING_NAME: optionalString,
-  /** 何を提供するか。未設定なら営業文を生成しない */
+  /** サービス提案: 何を提供するか。未設定なら生成しない */
   SALES_OFFERING_SUMMARY: optionalString,
-  /** 強み・提供できること（| 区切り） */
+  /** サービス提案: 強み・提供できること（| 区切り） */
   SALES_OFFERING_STRENGTHS: optionalString,
-  /** 依頼したい次の行動 */
-  SALES_OFFERING_CTA: optionalString,
 
   GBIZ_API_KEY: optionalString,
   GOOGLE_MAPS_API_KEY: optionalString,

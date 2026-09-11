@@ -11,6 +11,7 @@ import { computeSalesPriorityScore, rankFromScore } from "@/lib/scoring/priority
 import { employeeRangeFromCount } from "@/lib/companies/constants";
 import { getAiProvider } from "./index";
 import { buildAnalysisContext } from "./context";
+import { getOutreachConfig, outreachLabel, outreachMissingHint } from "@/lib/config/outreach";
 import { reviewOutreach } from "./outreach";
 import type { CompanyAnalysisOutput } from "./schemas";
 
@@ -73,14 +74,17 @@ export async function analyzeCompany(db: Db, companyId: string, logger: Logger):
   // 営業拒否: ルール検出 or AI 検出のいずれかで false
   const restriction = resolveSalesRestriction(company, out, pageRows);
 
-  // 営業文は「営業拒否が確認された企業には作らない」「推測した連絡先を書かせない」を機械的に担保する
+  // 文面は「営業拒否が確認された企業には作らない」「推測した連絡先を書かせない」
+  // 「その企業固有の事実に触れている」を機械的に担保する
+  const outreachConfig = getOutreachConfig();
   const outreach = reviewOutreach(out.sales_outreach, {
     salesContactAllowed: restriction.allowed,
     knownEmails: [company.email],
     knownPhones: [company.phone],
+    missingReason: outreachMissingHint(outreachConfig.purpose),
   });
   if (!outreach.ok && out.sales_outreach) {
-    await logger.warn("営業文を破棄", { company: company.company_name, reason: outreach.reason });
+    await logger.warn(`${outreachLabel(outreachConfig.purpose)}を破棄`, { company: company.company_name, reason: outreach.reason });
   }
 
   const analysis = await insertAnalysis(db, {
@@ -201,7 +205,7 @@ export async function analyzeCompany(db: Db, companyId: string, logger: Logger):
     outputTokens: result.usage.outputTokens,
     retries: result.retries,
     salesContactAllowed: restriction.allowed,
-    outreach: outreach.ok ? "作成" : outreach.reason,
+    outreach: outreach.ok ? `${outreachLabel(outreachConfig.purpose)}を作成` : outreach.reason,
   });
 
   return { analysis, salesContactAllowed: restriction.allowed };

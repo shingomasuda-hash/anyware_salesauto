@@ -10,6 +10,7 @@ import { OfficialSiteForm, type SiteCandidate } from "@/components/companies/off
 import { BulletList, DefinitionList, ExternalA, ScoreTile, Section } from "@/components/companies/detail-sections";
 import { employeeRangeLabel, industryLabel, SALES_RANKS } from "@/lib/companies/constants";
 import { getCompanyDetail } from "@/lib/companies/queries";
+import { getOutreachConfig, outreachLabel, outreachMissingHint } from "@/lib/config/outreach";
 import { listCompanySources } from "@/db/repositories/discovery";
 import { PROVIDER_LABELS } from "@/lib/discovery/criteria";
 import { getDb } from "@/db";
@@ -60,6 +61,7 @@ export default async function CompanyDetailPage({ params, searchParams }: { para
   // 情報源: どの Provider が何を観測したか（公的データ / 地図データ / Web検索 / 公式サイト確認）
   const sources = await listCompanySources(db, id);
   const { company: c, analysis: a, evidence, pages, crawlJobs, analysisJobs, analysisHistory } = detail;
+  const outreach = getOutreachConfig();
   const candidates = ((c.website_candidates as unknown as SiteCandidate[]) ?? []).filter((x) => x && x.url);
   const processing = crawlJobs.some((j) => ["pending", "processing", "retrying"].includes(j.status)) || analysisJobs.some((j) => ["pending", "processing", "retrying"].includes(j.status));
   const snsItems = [
@@ -309,7 +311,7 @@ export default async function CompanyDetailPage({ params, searchParams }: { para
 
       <div className="mt-4">
         <Section
-          title="営業文（下書き）"
+          title={`${outreachLabel(outreach.purpose)}（下書き）`}
           actions={
             c.sales_contact_allowed === "unknown" ? (
               <span className="text-xs text-amber-700">営業可否が未確認です。送信前に必ず問い合わせページを確認してください</span>
@@ -319,10 +321,10 @@ export default async function CompanyDetailPage({ params, searchParams }: { para
           }
         >
           {c.sales_contact_allowed === "false" ? (
-            <p className="text-sm text-red-700">この企業は営業をお断りしています。営業文は作成していません。</p>
+            <p className="text-sm text-red-700">この企業は営業をお断りしています。{outreachLabel(outreach.purpose)}は作成していません。</p>
           ) : !a?.outreach_body ? (
             <p className="text-sm text-muted-foreground">
-              営業文はまだありません。自社サービスの設定（SALES_OFFERING_SUMMARY）が入っていると、AI分析と同時に企業ごとの下書きが作られます。
+              {outreachLabel(outreach.purpose)}はまだありません。{outreach.configured ? "AI分析が終わると企業ごとの下書きが作られます。" : outreachMissingHint(outreach.purpose)}
             </p>
           ) : (
             <div className="space-y-3">

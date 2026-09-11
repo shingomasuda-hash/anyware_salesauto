@@ -31,10 +31,10 @@ describe("reviewOutreach", () => {
     expect(reviewOutreach(draft, { ...context, salesContactAllowed: "unknown" }).ok).toBe(true);
   });
 
-  it("自社サービス未設定（null）なら理由を返す", () => {
-    const result = reviewOutreach(null, context);
+  it("依頼内容が未設定（null）なら、設定すべき項目を理由に返す", () => {
+    const result = reviewOutreach(null, { ...context, missingReason: "取材テーマ（SALES_INTERVIEW_TOPIC）が未設定のため生成していません" });
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toContain("SALES_OFFERING_SUMMARY");
+    if (!result.ok) expect(result.reason).toContain("SALES_INTERVIEW_TOPIC");
   });
 
   it("企業固有の事実に触れていない文面は破棄する", () => {

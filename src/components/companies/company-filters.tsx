@@ -80,7 +80,7 @@ export function CompanyFilterForm({ filters }: { filters: CompanyFilters }) {
         <Check name="hasWebsite" label="公式HPあり" checked={filters.hasWebsite} />
         <Check name="hasContact" label="問い合わせ先あり" checked={filters.hasContact} />
         <Check name="hasEmail" label="メールアドレスあり" checked={filters.hasEmail} />
-        <Check name="hasOutreach" label="営業文あり" checked={filters.hasOutreach} />
+        <Check name="hasOutreach" label="文面あり" checked={filters.hasOutreach} />
         <Check name="excludeRestricted" label="営業可のみ（拒否・未確認を除外）" checked={filters.excludeRestricted} />
         <Check name="unanalyzed" label="未解析" checked={filters.unanalyzed} />
         <Check name="needsReview" label="HP要確認" checked={filters.needsReview} />

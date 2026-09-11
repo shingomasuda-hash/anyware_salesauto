@@ -1,5 +1,5 @@
 import type { AiProvider, AnalysisRequest, AnalysisResult } from "./provider";
-import { getSalesOffering } from "@/lib/config/offering";
+import { getOutreachConfig } from "@/lib/config/outreach";
 import type { CompanyAnalysisOutput } from "./schemas";
 
 function hash(str: string): number {
@@ -94,7 +94,7 @@ export class MockAiProvider implements AiProvider {
       evidence_text: /recruit/i.test(url) ? (hasInterview ? "採用ページに社員インタビューあり" : "採用ページに募集職種の記載あり（社員紹介なし）") : /contact/i.test(url) ? (hints.salesRestrictionText ? `営業拒否表記: ${hints.salesRestrictionText.slice(0, 80)}` : "問い合わせフォーム・電話番号を確認") : i === 0 ? `トップページ（${latestYear ? `最新年表記 ${latestYear}` : "年表記なし"}）` : "ページ内容を確認",
     }));
 
-    const offering = getSalesOffering();
+    const outreachConfig = getOutreachConfig();
     const output: CompanyAnalysisOutput = {
       company_summary: `${hints.companyName}。公式サイトの記載に基づくと、${ctx.match(/製造|加工/) ? "製造・加工" : "事業"}を主軸とする企業。`,
       business_summary: summarizeBusiness(ctx),
@@ -126,13 +126,20 @@ export class MockAiProvider implements AiProvider {
         restriction_text: hints.salesRestrictionText,
         source_url: hints.salesRestrictionUrl,
       },
-      sales_outreach: offering.configured && !hints.salesRestrictionText
-        ? {
-            subject: `${hints.companyName}様 ${offering.name ?? "サービス"}のご提案`,
-            body: `${hints.companyName} ご担当者様\n\n${facts[0] ?? "公式サイトを拝見しました"}という点を拝見し、ご連絡しました。\n${offering.summary ?? ""}\n\n${offering.cta ?? "一度お話をうかがえないでしょうか"}。\n\n${offering.senderCompany ?? ""}\n\n（モック生成: Claude API を使用していません）`,
-            personalization: facts.slice(0, 2),
-            hypothesis_note: "課題の想定はサイト記載からの推測です",
-          }
+      sales_outreach: outreachConfig.configured && !hints.salesRestrictionText
+        ? outreachConfig.purpose === "interview"
+          ? {
+              subject: `取材のお願い（${outreachConfig.interviewTopic ?? "取材"}）`,
+              body: `${hints.companyName} ご担当者様\n\n${facts[0] ?? "公式サイトを拝見しました"}という点に関心を持ち、取材のお願いでご連絡しました。\n${outreachConfig.interviewTopic ?? ""}についてお話をうかがえないでしょうか。${outreachConfig.interviewFormat ?? ""}\n\nご都合が合わない場合はお気になさらないでください。\n\n${outreachConfig.senderCompany ?? ""}\n\n（モック生成: Claude API を使用していません）`,
+              personalization: facts.slice(0, 2),
+              hypothesis_note: null,
+            }
+          : {
+              subject: `${hints.companyName}様 ${outreachConfig.offeringName ?? "サービス"}のご提案`,
+              body: `${hints.companyName} ご担当者様\n\n${facts[0] ?? "公式サイトを拝見しました"}という点を拝見し、ご連絡しました。\n${outreachConfig.offeringSummary ?? ""}\n\n${outreachConfig.cta ?? "一度お話をうかがえないでしょうか"}。\n\n${outreachConfig.senderCompany ?? ""}\n\n（モック生成: Claude API を使用していません）`,
+              personalization: facts.slice(0, 2),
+              hypothesis_note: "課題の想定はサイト記載からの推測です",
+            }
         : null,
       evidence,
       analysis_reason: `【確認できた事実】\n${facts.map((f) => `・${f}`).join("\n")}\n\n【推測】\n${inferences.map((f) => `・${f}`).join("\n") || "・特になし"}\n\n（モック分析: Claude API を使用していません）`,
