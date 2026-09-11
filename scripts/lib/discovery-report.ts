@@ -198,6 +198,7 @@ export async function printCompanyMetrics(db: Db, candidates: DiscoveryCandidate
   console.log(`問い合わせ取得率    : ${pct(contact, companies.length)}`);
   console.log(`SNS取得率           : ${pct(sns, companies.length)}`);
   console.log(`AI分析成功率        : ${pct(analyzed, companies.length)}`);
+  console.log(`  ※ 過去のランで分析済みの企業も含みます。今回かかった費用は npm run ai:cost で確認してください`);
 
   // AI分析まで到達しなかった企業は、クロール段階で止まっていることが多い。
   // 原因が分かるよう、クロール状態の内訳と失敗理由を出す。
@@ -264,9 +265,20 @@ async function printProviderContribution(db: Db, run: DiscoveryRunRow, candidate
     const rate = getEnv().AI_USD_JPY_RATE;
     const usd = searchRequestsToUsd(searchRequests);
     const perCompany = searchRequests / Math.max(1, newOnes.length);
+    const registered = newOnes.filter((c) => c.status === "verified" && c.company_id).length;
     console.log(`\nWeb検索の利用     : ${searchRequests}回（候補1件あたり ${perCompany.toFixed(1)}回）`);
     console.log(`  概算費用        : $${usd.toFixed(2)} ≒ ${Math.round(usd * rate).toLocaleString()}円（Brave Search: $5 / 1,000リクエスト）`);
-    console.log(`  この比率のまま月3,000社を発見した場合: 約${Math.round(searchRequestsToUsd(perCompany * 3000) * rate).toLocaleString()}円/月`);
+    console.log(`  月3,000「候補」を発見する場合  : 約${Math.round(searchRequestsToUsd(perCompany * 3000) * rate).toLocaleString()}円/月`);
+    if (registered > 0) {
+      // 「100社/日」は登録社数を指すことが多い。候補を何件掘れば1社登録できるかで換算する
+      const perRegistered = searchRequests / registered;
+      const candidatesPerRegistered = newOnes.length / registered;
+      console.log(
+        `  月3,000「社を登録」する場合    : 約${Math.round(searchRequestsToUsd(perRegistered * 3000) * rate).toLocaleString()}円/月` +
+          `（1社登録あたり候補 ${candidatesPerRegistered.toFixed(1)}件 / 検索 ${perRegistered.toFixed(1)}回）`,
+      );
+      console.log(`  → 確認済み率が上がるほど、1社あたりの検索回数＝費用は下がります`);
+    }
   }
 
   console.log("Provider別 新規企業数（その情報源が発見に関与した候補）:");

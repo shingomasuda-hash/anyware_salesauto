@@ -1,4 +1,4 @@
-import { extractDomain, normalizeCompanyName, normalizePhone, stripCorporateSuffix, toHalfWidth } from "./normalize";
+import { addressAppearsIn, extractDomain, normalizeCompanyName, normalizePhone, stripCorporateSuffix, toHalfWidth } from "./normalize";
 
 /** 公式サイトとして扱わないドメイン（求人媒体・SNS・企業DB・地図等） */
 export const NON_OFFICIAL_DOMAINS: string[] = [
@@ -143,13 +143,10 @@ export function scoreOfficialSiteCandidate(target: OfficialSiteTarget, candidate
     reasons.push("ドメイン名が会社名に類似");
   }
 
-  // 所在地
-  if (target.address && text) {
-    const addrKey = toHalfWidth(target.address).replace(/\s/g, "").slice(0, 12);
-    if (addrKey && text.replace(/\s/g, "").includes(addrKey)) {
-      score += 15;
-      reasons.push("所在地が一致");
-    }
+  // 所在地（都道府県を省いた表記・丁目/番地の揺れも一致とみなす）
+  if (target.address && text && addressAppearsIn(target.address, text)) {
+    score += 15;
+    reasons.push("所在地が一致");
   }
 
   // 電話番号

@@ -43,6 +43,38 @@ export function normalizeAddress(address: string | null | undefined): string | n
   return s.toLowerCase();
 }
 
+/**
+ * 所在地の照合キー。テキスト中にこのいずれかが現れたら「所在地が一致」とみなす。
+ *
+ * 公的データ（GビズINFO）は「大阪府東大阪市長田中1丁目2番3号」と県名から書くが、
+ * 企業サイトは「〒577-0013 東大阪市長田中1-2-3」のように都道府県を省くことが多い。
+ * 完全一致を求めると実在の企業が軒並み照合できず、確認済みに上がらない。
+ * そこで「県名あり」「県名なし」の両方をキーにし、市区町村から下だけでも一致を取れるようにする。
+ *
+ * 誤一致を避けるため、6文字未満のキー（市名だけ等）は使わない。
+ */
+export function addressMatchKeys(address: string | null | undefined): string[] {
+  if (!address) return [];
+  const keys: string[] = [];
+  const full = normalizeAddress(address);
+  if (full) keys.push(full.slice(0, 12));
+
+  const pref = extractPrefecture(address);
+  if (pref) {
+    const withoutPref = normalizeAddress(address.replace(pref, ""));
+    if (withoutPref) keys.push(withoutPref.slice(0, 10));
+  }
+  return [...new Set(keys.filter((k) => k.length >= 6))];
+}
+
+/** 正規化済みテキストに所在地が現れるか */
+export function addressAppearsIn(address: string | null | undefined, text: string | null | undefined): boolean {
+  const keys = addressMatchKeys(address);
+  if (keys.length === 0 || !text) return false;
+  const haystack = normalizeAddress(text) ?? "";
+  return keys.some((k) => haystack.includes(k));
+}
+
 const KANJI_DIGITS: Record<string, number> = { 〇: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
 
 export function kanjiToNumber(s: string): number {

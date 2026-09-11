@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractCity, extractDomain, extractPrefecture, normalizeAddress, normalizeCompanyName, normalizeCorporateNumber, normalizePhone, normalizeUrl, parseEmployeeCount } from "../normalize";
+import { addressAppearsIn, addressMatchKeys, extractCity, extractDomain, extractPrefecture, normalizeAddress, normalizeCompanyName, normalizeCorporateNumber, normalizePhone, normalizeUrl, parseEmployeeCount } from "../normalize";
 
 describe("normalizeUrl", () => {
   it("adds https scheme and lowercases host", () => {
@@ -74,5 +74,41 @@ describe("normalizePhone / corporate number / employee count", () => {
     expect(parseEmployeeCount("1,200")).toBe(1200);
     expect(parseEmployeeCount(null)).toBeNull();
     expect(parseEmployeeCount(0)).toBeNull();
+  });
+});
+
+describe("所在地の照合（addressAppearsIn）", () => {
+  // GビズINFO は県名から書き、企業サイトは省くことが多い。
+  // 完全一致を求めると実在の企業が確認済みに上がらず、営業リストに乗らない。
+  const gbiz = "大阪府東大阪市長田中1丁目2番3号";
+
+  it("県名まで含めて一致する", () => {
+    expect(addressAppearsIn(gbiz, "所在地 大阪府東大阪市長田中1-2-3")).toBe(true);
+  });
+
+  it("県名を省いたサイト表記でも一致する", () => {
+    expect(addressAppearsIn(gbiz, "〒577-0013 東大阪市長田中1-2-3 TEL 06-0000-0000")).toBe(true);
+  });
+
+  it("丁目・番地の表記ゆれを吸収する", () => {
+    expect(addressAppearsIn(gbiz, "東大阪市長田中一丁目2番3号")).toBe(true);
+  });
+
+  it("別の市の住所とは一致しない", () => {
+    expect(addressAppearsIn(gbiz, "大阪府八尾市太子堂1-2-3")).toBe(false);
+  });
+
+  it("同じ市でも町名が違えば一致しない", () => {
+    expect(addressAppearsIn(gbiz, "大阪府東大阪市荒本北1-2-3")).toBe(false);
+  });
+
+  it("住所もテキストも無ければ一致しない", () => {
+    expect(addressAppearsIn(null, "大阪府東大阪市長田中1-2-3")).toBe(false);
+    expect(addressAppearsIn(gbiz, null)).toBe(false);
+  });
+
+  it("市名だけの短いキーでは一致させない（誤一致の防止）", () => {
+    // 「大阪市」のみの住所は 6 文字未満のキーしか作れないため照合に使わない
+    expect(addressMatchKeys("大阪府大阪市").every((k) => k.length >= 6)).toBe(true);
   });
 });

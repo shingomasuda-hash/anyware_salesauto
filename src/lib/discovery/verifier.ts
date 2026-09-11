@@ -1,5 +1,5 @@
 import { getDiscoveryConfig } from "@/lib/config/discovery";
-import { normalizeAddress, normalizeCompanyName, toHalfWidth } from "@/lib/companies/normalize";
+import { addressAppearsIn, normalizeCompanyName, toHalfWidth } from "@/lib/companies/normalize";
 import type { DiscoveryCandidateStatus, DiscoveryProviderName, MergedCandidate } from "./types";
 
 export interface VerificationSignal {
@@ -56,10 +56,8 @@ export function verifyCandidate(candidate: MergedCandidate, evidence: Verificati
   const nameOnSite = Boolean(nameNorm) && haystack.includes(nameNorm);
   add("website_name", "公式サイトに会社名", nameOnSite, weights.websiteNameMatch);
 
-  // 所在地の一致
-  const addrNorm = normalizeAddress(candidate.address);
-  const addrKey = addrNorm ? addrNorm.slice(0, 12) : "";
-  const addressMatch = Boolean(addrKey) && normalizeAddress(text)?.includes(addrKey) === true;
+  // 所在地の一致（企業サイトは都道府県を省くことが多いので、市区町村から下でも一致を取る）
+  const addressMatch = addressAppearsIn(candidate.address, text);
   add("address", "所在地が一致", addressMatch, weights.addressMatch);
 
   // 電話番号の一致

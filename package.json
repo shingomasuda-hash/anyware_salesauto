@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:dedupe-sources": "tsx scripts/dedupe-company-sources.ts",
     "db:studio": "drizzle-kit studio",
     "db:check": "drizzle-kit check",
     "seed": "tsx scripts/seed.ts",

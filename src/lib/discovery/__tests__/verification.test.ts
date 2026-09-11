@@ -139,3 +139,56 @@ describe("detectRecruitingSignal", () => {
     expect(detectRecruitingSignal([{ url: "https://x.co.jp/", text: "短い" }])).toBe("unknown");
   });
 });
+
+describe("実データで多い形（GビズINFO + 検索で見つけた公式サイト）", () => {
+  const { thresholds } = getDiscoveryConfig();
+
+  /** GビズINFO は電話番号を持たず、住所は必ず都道府県から始まる */
+  function gbizOnly(address: string): MergedCandidate {
+    const base = toMerged(
+      toCandidate({
+        name: "株式会社杉岡鉄工所",
+        address,
+        phone: null,
+        corporateNumber: "9876543210987",
+        source: "gbiz",
+        sourceConfidence: 90,
+      }),
+    );
+    return { ...base, sources: ["gbiz"], domain: "sugioka-tekko.co.jp" };
+  }
+
+  // 企業サイトの住所表記は郵便番号つき・都道府県なしが多い
+  const SITE = `株式会社杉岡鉄工所
+〒577-0013 東大阪市長田中2丁目4番8号
+TEL 06-0000-0000`;
+
+  it("都道府県を省いたサイト表記でも所在地が一致し verified になる", () => {
+    const r = verifyCandidate(gbizOnly("大阪府東大阪市長田中2丁目4番8号"), {
+      websiteText: SITE,
+      websiteTitle: "株式会社杉岡鉄工所",
+      officialSiteConfidence: 65,
+    });
+    expect(r.matched).toContain("所在地が一致");
+    expect(r.status).toBe("verified");
+  });
+
+  it("電話番号が無い（GビズINFO由来）だけでは verified を妨げない", () => {
+    const r = verifyCandidate(gbizOnly("大阪府東大阪市長田中2丁目4番8号"), {
+      websiteText: SITE,
+      websiteTitle: "株式会社杉岡鉄工所",
+      officialSiteConfidence: 65,
+    });
+    expect(r.unmatched).toContain("電話番号が一致");
+    expect(r.score).toBeGreaterThanOrEqual(thresholds.verified);
+  });
+
+  it("別会社のサイトを掴んだ場合は verified にしない", () => {
+    const r = verifyCandidate(gbizOnly("大阪府東大阪市長田中2丁目4番8号"), {
+      websiteText: "株式会社別会社 大阪府八尾市太子堂1-1-1",
+      websiteTitle: "株式会社別会社",
+      officialSiteConfidence: 30,
+    });
+    expect(r.status).not.toBe("verified");
+  });
+});
