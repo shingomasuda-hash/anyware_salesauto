@@ -122,3 +122,20 @@ describe("2回目の実データ検証で判明した社名の誤抽出", () => 
     expect(cleanCompanyName("株式会社きのこ")).toBe("株式会社きのこ");
   });
 });
+
+describe("3回目の実データ検証で判明した公式サイトの誤マッチ", () => {
+  it("法人情報データベース・地域ポータルを公式サイト候補にしない", () => {
+    // 社名が必ずページ内に現れるため、除外しないと「社名一致」で加点され誤採用される
+    const blocked = [
+      "www.houjinbase.com", "houjin.goo.to", "fumadata.com", "j-lic.com",
+      "www.mono-web.jp", "www.yao-mono.jp", "corporate-number.com", "www.nta.go.jp",
+    ];
+    for (const d of blocked) expect([d, isNonOfficialDomain(d)]).toEqual([d, true]);
+  });
+
+  it("実企業のドメインは引き続き通す", () => {
+    for (const d of ["www.asahi-chem.co.jp", "kinoshita-kogyo.co.jp", "hamadakagu.jp", "nakata-ss.co.jp"]) {
+      expect([d, isNonOfficialDomain(d)]).toEqual([d, false]);
+    }
+  });
+});

@@ -15,6 +15,11 @@ export const NON_OFFICIAL_DOMAINS: string[] = [
   "monodzukuri.com", "kinzoku-kakou.net", "imitsu.jp", "ipros.jp", "ipros.com", "nc-net.or.jp",
   "tsukuruo.jp", "meviy.misumi-ec.com", "misumi-ec.com", "monotaro.com", "zenrin.co.jp",
   "job-medley.com", "kyujin-box.com", "shigoto.mhlw.go.jp", "jobcan.ne.jp",
+  // 法人情報データベース / 地域ものづくりポータル。
+  // 社名がページ内に必ず現れるため、除外しないと「社名一致」で加点され誤って公式サイト扱いになる
+  "houjinbase.com", "houjin.goo.to", "goo.to", "fumadata.com", "j-lic.com", "mono-web.jp",
+  "yao-mono.jp", "houjin-navi.com", "corporate-number.com", "nta.go.jp", "gbiz.go.jp",
+  "baseconnect.jp", "sansan.com", "eight.evercam.jp", "meti-mono.jp",
 ];
 
 /** 自治体・官公庁のドメイン（公式サイト候補にしない） */

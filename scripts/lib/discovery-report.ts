@@ -183,6 +183,22 @@ export async function printCompanyMetrics(db: Db, candidates: DiscoveryCandidate
   console.log(`SNS取得率           : ${pct(sns, companies.length)}`);
   console.log(`AI分析成功率        : ${pct(analyzed, companies.length)}`);
 
+  // AI分析まで到達しなかった企業は、クロール段階で止まっていることが多い。
+  // 原因が分かるよう、クロール状態の内訳と失敗理由を出す。
+  const notAnalyzed = companies.filter((d) => !d.analysis);
+  if (notAnalyzed.length > 0) {
+    const byCrawl = notAnalyzed.reduce<Record<string, number>>((acc, d) => {
+      const k = d.company.crawl_status;
+      return { ...acc, [k]: (acc[k] ?? 0) + 1 };
+    }, {});
+    console.log(`  未分析 ${notAnalyzed.length}社のクロール状態: ${Object.entries(byCrawl).map(([k, v]) => `${k}=${v}`).join(" / ")}`);
+    const failures = notAnalyzed
+      .map((d) => ({ name: d.company.company_name, error: d.crawlJobs.find((j) => j.error)?.error ?? null }))
+      .filter((f) => f.error);
+    for (const f of failures.slice(0, 5)) console.log(`    - ${f.name}: ${(f.error ?? "").slice(0, 120)}`);
+    if (failures.length > 5) console.log(`    … 他 ${failures.length - 5}件`);
+  }
+
   const ranks = companies.map((d) => d.analysis?.sales_priority_rank).filter(Boolean) as string[];
   const dist = ranks.reduce<Record<string, number>>((acc, r) => ({ ...acc, [r]: (acc[r] ?? 0) + 1 }), {});
   console.log(`営業ランク分布      : ${["A", "B", "C", "D"].map((r) => `${r}=${dist[r] ?? 0}`).join(" / ")}`);

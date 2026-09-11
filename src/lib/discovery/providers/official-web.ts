@@ -7,6 +7,12 @@ import { toCandidate } from "../normalizer";
 import { getSearchEngine } from "./web-search";
 import type { CompanyDiscoveryProvider, DiscoveryCandidate, DiscoveryContext, DiscoveryQuery, MergedCandidate } from "../types";
 
+/**
+ * 自分で Web 検索して見つけたサイトを公式サイトとして採用する最低確信度。
+ * 情報源から渡された URL は出所の裏付けがあるためこの制限を適用しない。
+ */
+const SEARCHED_SITE_MIN_CONFIDENCE = 40;
+
 export interface OfficialSiteCheck {
   url: string | null;
   domain: string | null;
@@ -99,7 +105,8 @@ export class OfficialWebProvider implements CompanyDiscoveryProvider {
     );
 
     // 候補URLが無い場合のみ Web 検索で探す（既に分かっていれば余計なリクエストをしない）
-    const urls = (known.length > 0 ? known : await this.searchWebsiteCandidates(candidate, context)).slice(0, 3);
+    const fromSearch = known.length === 0;
+    const urls = (fromSearch ? await this.searchWebsiteCandidates(candidate, context) : known).slice(0, 3);
 
     if (urls.length === 0) {
       return { url: null, domain: null, confidence: null, title: null, text: null, status: "no_website", reasons: ["公式サイト候補が見つかりません"] };
@@ -136,6 +143,21 @@ export class OfficialWebProvider implements CompanyDiscoveryProvider {
       fetched,
     );
     const best = decision.best;
+
+    // 自分で検索して見つけた URL は、照合がほとんど効いていない場合「別会社のサイト」である可能性が高い。
+    // 情報源から渡された URL と違い出所の裏付けが無いため、最低限の確からしさを満たさないものは
+    // 公式サイトとして採用せず、URL も記録しない（誤った公式サイトを残さない）。
+    if (fromSearch && (best?.confidence ?? 0) < SEARCHED_SITE_MIN_CONFIDENCE) {
+      return {
+        url: null,
+        domain: null,
+        confidence: best?.confidence ?? null,
+        title: null,
+        text: null,
+        status: "no_website",
+        reasons: [`検索で見つけたサイトは会社情報と十分に一致しませんでした（確度 ${best?.confidence ?? 0}）`],
+      };
+    }
     const bestPage = fetched.find((f) => f.url === best?.url);
     return {
       url: best?.url ?? null,
