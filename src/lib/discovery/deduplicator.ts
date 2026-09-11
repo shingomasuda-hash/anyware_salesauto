@@ -86,7 +86,7 @@ export function sourcePriority(source: DiscoveryProviderName): number {
  * （Google の住所で GビズINFO の住所を勝手に上書きしない）。
  */
 export function mergeCandidates(base: MergedCandidate, incoming: DiscoveryCandidate): MergedCandidate {
-  const all = [...base.observations, incoming];
+  const all = dedupeObservations([...base.observations, incoming]);
   const best = <K extends keyof DiscoveryCandidate>(field: K): DiscoveryCandidate[K] => {
     const withValue = all.filter((o) => o[field] !== null && o[field] !== undefined && o[field] !== "");
     if (withValue.length === 0) return base[field] as DiscoveryCandidate[K];
@@ -115,6 +115,23 @@ export function mergeCandidates(base: MergedCandidate, incoming: DiscoveryCandid
     observations: all,
     sources: Array.from(new Set([...base.sources, incoming.source])),
   };
+}
+
+/**
+ * 同じ観測の重複を取り除く。
+ * 同一企業が複数のクエリで何度もヒットすると、同じ Provider の同じ観測が何十件も積み上がり、
+ * company_sources に同じ行が並んでしまうため、情報源としての中身が同じものは 1 件にまとめる。
+ */
+export function dedupeObservations(observations: DiscoveryCandidate[]): DiscoveryCandidate[] {
+  const seen = new Set<string>();
+  const result: DiscoveryCandidate[] = [];
+  for (const o of observations) {
+    const key = [o.source, o.sourceId ?? "", o.sourceUrl ?? "", o.normalizedName ?? o.name, o.address ?? "", o.website ?? "", o.phone ?? ""].join("|");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(o);
+  }
+  return result;
 }
 
 export function toMerged(candidate: DiscoveryCandidate): MergedCandidate {

@@ -69,7 +69,7 @@ export function DiscoveryProgress({ runId, initial }: { runId: string; initial: 
 
   const run = p.run;
   const target = run.requested_count;
-  // 「新規候補」は重複（既に登録済みの企業）を除いた件数。duplicate は別軸なので足さない
+  // 「新規候補」は重複（既存企業と一致 / 同一ラン内で同じ企業を指す候補）を除いた件数。duplicate は別軸なので足さない
   const discovered = p.counts.discovered + p.counts.verifying + p.counts.verified + p.counts.needs_review + p.counts.rejected + p.counts.failed;
   const pct = target > 0 ? Math.min(100, Math.round((run.promoted_count / target) * 100)) : 0;
   const verifyTotal = p.counts.verified + p.counts.needs_review + p.counts.rejected + p.counts.failed;
@@ -127,7 +127,7 @@ export function DiscoveryProgress({ runId, initial }: { runId: string; initial: 
       </p>
 
       <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <Stat label="重複（別集計）" value={p.counts.duplicate} hint="既に登録済み。新規候補に含みません" />
+        <Stat label="重複（別集計）" value={p.counts.duplicate} hint="既存企業と一致、または同じ企業を別ソースが発見。新規候補に含みません" />
         <Stat label="登録" value={p.run.promoted_count} hint={`確認済のうち企業登録 / 目標 ${target}社`} />
       </div>
 

@@ -168,3 +168,39 @@ describe("50社検証で判明した公式サイト候補のノイズ", () => {
     expect(looksLikeCorporateDatabaseUrl("https://yamada-ss.co.jp/company/")).toBe(false);
   });
 });
+
+describe("50社検証で残った見出しノイズ", () => {
+  const rejected = [
+    // 業種・工程・製品の一般名詞だけ
+    "電気機器",
+    "切削加工品",
+    "強み",
+    "精密加工",
+    "表面処理",
+    // 業界団体・協同組合
+    "大阪化学工業薬品協会INDEX",
+    "大阪府電気工事工業組合",
+    "大阪商工会議所",
+    // 記事タイトル
+    "電力会社・電気料金プランランキング",
+    "金属加工工場おすすめ10選",
+    // 語が並んだ見出し
+    "実像~ 大阪ブランドコミッティ 家電パネル",
+  ];
+  for (const name of rejected) {
+    it(`除外する: ${name}`, () => {
+      expect(isPlausibleCompany(candidate(cleanCompanyName(name)))).toBe(false);
+    });
+  }
+
+  it("法人格の無い実企業名は通す", () => {
+    // 一般名詞を含んでいても、固有名詞が付いていれば企業として扱う
+    for (const name of ["高千穂精機", "旭化学工業", "浪速樹脂工業", "眞木鉄工所", "木村精機", "日高製作所", "タツタ電線"]) {
+      expect(isPlausibleCompany(candidate(name))).toBe(true);
+    }
+  });
+
+  it("英語表記の社名を語数で落とさない", () => {
+    expect(isPlausibleCompany(candidate("Naniwa Precision Works"))).toBe(true);
+  });
+});

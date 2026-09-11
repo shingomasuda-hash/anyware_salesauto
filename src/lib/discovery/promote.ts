@@ -10,6 +10,7 @@ import { insertCompanySources, updateCandidate } from "@/db/repositories/discove
 import { registerCompany } from "@/lib/companies/register";
 import { enqueueCrawlJob } from "@/lib/jobs/enqueue";
 import type { Logger } from "@/lib/logging/logger";
+import { dedupeObservations } from "./deduplicator";
 import type { DiscoveryCandidate, MergedCandidate } from "./types";
 
 export interface PromoteOptions {
@@ -100,7 +101,19 @@ export async function saveCompanySources(db: Db, companyId: string, row: Discove
       observed_data: { verificationScore: row.verification_score, signals: row.verification_signals } as unknown as Json,
     });
   }
-  await insertCompanySources(db, sources);
+  // ON CONFLICT DO NOTHING は同一 INSERT 文の中の重複を弾かないため、ここで畳んでおく
+  await insertCompanySources(db, dedupeSourceRows(sources));
+}
+
+/** (provider, external_id, source_url) が同じ行は confidence の高い 1 件だけ残す */
+function dedupeSourceRows(rows: CompanySourceInsert[]): CompanySourceInsert[] {
+  const byKey = new Map<string, CompanySourceInsert>();
+  for (const row of rows) {
+    const key = [row.provider, row.external_id ?? "", row.source_url ?? "", row.source_type ?? ""].join("|");
+    const prev = byKey.get(key);
+    if (!prev || (row.confidence ?? 0) > (prev.confidence ?? 0)) byKey.set(key, row);
+  }
+  return [...byKey.values()];
 }
 
 /** discovery_candidates の行を MergedCandidate に戻す（観測は raw_data に保持している） */
@@ -124,7 +137,7 @@ export function rowToMerged(row: DiscoveryCandidateRow): MergedCandidate {
     rawData: row.raw_data,
     discoveredAt: row.created_at,
   };
-  const observations = Array.isArray(raw.observations) && raw.observations.length > 0 ? raw.observations : [base];
+  const observations = Array.isArray(raw.observations) && raw.observations.length > 0 ? dedupeObservations(raw.observations) : [base];
   const sources = row.sources as DiscoveryProviderName[];
   return { ...base, observations, sources: sources.length > 0 ? sources : [row.primary_source] };
 }

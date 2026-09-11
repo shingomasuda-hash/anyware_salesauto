@@ -14,9 +14,10 @@ import { getDiscoveryConfig, scaleBudgetForRequest } from "@/lib/config/discover
 import { normalizeAddress } from "@/lib/companies/normalize";
 import { aggregateCandidates } from "@/lib/discovery/aggregator";
 import { createBudgetTracker, emptyProviderStat, mergeProviderStats } from "@/lib/discovery/budget";
-import { toMerged } from "@/lib/discovery/deduplicator";
+import { dedupeObservations, toMerged } from "@/lib/discovery/deduplicator";
 import { promoteCandidate, rowToMerged } from "@/lib/discovery/promote";
 import { planFallbackQueries, planQueries } from "@/lib/discovery/query-planner";
+import { planReconciliation, RECONCILE_REASON_LABEL } from "@/lib/discovery/reconcile";
 import { getOfficialWebProvider, resolveProviders } from "@/lib/discovery/providers";
 import { detectRecruitingSignal } from "@/lib/discovery/signals";
 import { matchesCriteria, verifyCandidate } from "@/lib/discovery/verifier";
@@ -272,6 +273,8 @@ async function runVerifyingPhase(
 ): Promise<StepOutcome> {
   const pending = await claimCandidatesForVerification(db, run.id, VERIFY_BATCH);
   if (pending.length === 0) {
+    // 本人確認で新たに判明した法人番号・公式ドメインで、発見時には結び付かなかった候補を突き合わせる
+    await reconcileRunCandidates(db, run.id, logger);
     const counts = await refreshDiscoveryRunCounts(db, run.id);
     await logger.info("本人確認を完了", counts.byStatus);
     await updateDiscoveryRun(db, run.id, { phase: "promoting" });
@@ -390,6 +393,52 @@ async function verifyOne(
   return { stats };
 }
 
+/**
+ * 本人確認後の突き合わせ。
+ * 発見時点では GビズINFO 側にドメインが無く、Web 検索側に法人番号・住所が無いため
+ * 「同じ会社を別の情報源が見つけていた」ことを判定できない。公式サイト確認と法人番号照会を
+ * 終えたこの時点でもう一度だけ突き合わせ、裏付けの取れた候補に情報源を集約する。
+ */
+async function reconcileRunCandidates(db: Db, runId: string, logger: Logger): Promise<number> {
+  const rows = await listCandidatesByRun(db, runId, undefined, 1000);
+  const groups = planReconciliation(rows);
+  if (groups.length === 0) return 0;
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  let folded = 0;
+
+  for (const group of groups) {
+    const survivor = byId.get(group.survivorId);
+    if (!survivor) continue;
+    const losers = group.duplicates.map((d) => ({ ...d, row: byId.get(d.id) })).filter((d) => d.row);
+
+    const sources = unique([...(survivor.sources as string[]), ...losers.flatMap((l) => l.row!.sources as string[])]);
+    const observations = dedupeObservations([
+      ...rowToMerged(survivor).observations,
+      ...losers.flatMap((l) => rowToMerged(l.row!).observations),
+    ]);
+    await updateCandidate(db, survivor.id, {
+      sources: sources as DiscoveryCandidateInsert["sources"],
+      raw_data: { ...(survivor.raw_data as object), observations, reconciledFrom: losers.map((l) => l.id) } as unknown as Json,
+    });
+
+    for (const loser of losers) {
+      await updateCandidate(db, loser.id, {
+        status: "duplicate",
+        company_id: loser.row!.company_id ?? survivor.company_id,
+        reject_reason: `同一ラン内の別候補と同一企業（${RECONCILE_REASON_LABEL[loser.reason]}）`,
+        raw_data: { ...(loser.row!.raw_data as object), duplicateOfCandidateId: survivor.id } as unknown as Json,
+      });
+      folded += 1;
+    }
+    await logger.info("複数の情報源が同一企業を指していたため統合", {
+      company: survivor.name,
+      sources,
+      folded: losers.map((l) => l.row!.name),
+    });
+  }
+  return folded;
+}
+
 // ---------------------------------------------------------------------------
 // Phase 3: promoting
 // ---------------------------------------------------------------------------
@@ -463,7 +512,7 @@ function mergeObservation(base: MergedCandidate, incoming: DiscoveryCandidate): 
     website: base.website ?? incoming.website,
     domain: base.domain ?? incoming.domain,
     industry: base.industry ?? incoming.industry,
-    observations: [...base.observations, incoming],
+    observations: dedupeObservations([...base.observations, incoming]),
     sources: unique([...base.sources, incoming.source]),
   };
 }

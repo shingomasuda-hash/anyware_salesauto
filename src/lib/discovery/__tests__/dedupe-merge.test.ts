@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deduplicate, findDuplicate, mergeCandidates, similarity, sourcePriority, toMerged } from "../deduplicator";
+import { dedupeObservations, deduplicate, findDuplicate, mergeCandidates, similarity, sourcePriority, toMerged } from "../deduplicator";
 import { cleanCompanyName, isPlausibleCompany, toCandidate } from "../normalizer";
 import type { DiscoveryCandidate, DiscoveryProviderName } from "../types";
 
@@ -109,5 +109,29 @@ describe("deduplicate", () => {
     const result = deduplicate([make({ name: "ヤマダ製作所", corporateNumber: "1234567890123" })], seed);
     expect(result.merged).toHaveLength(1);
     expect(result.duplicateCount).toBe(1);
+  });
+});
+
+describe("dedupeObservations", () => {
+  it("同じ情報源の同じ観測を1件に畳む", () => {
+    // 同一企業が複数クエリでヒットしても company_sources に同じ行が並ばないようにする
+    const gbiz = make({ name: "株式会社木村精機", corporateNumber: "1234567890123", address: "大阪府大阪市1-1", source: "gbiz", sourceConfidence: 90 });
+    const observations = [gbiz, { ...gbiz }, { ...gbiz }, make({ name: "株式会社木村精機", website: "https://kimura.example.jp", source: "web_search" })];
+    expect(dedupeObservations(observations)).toHaveLength(2);
+  });
+
+  it("同じ Provider でも観測内容が違えば残す", () => {
+    const a = make({ name: "株式会社木村精機", address: "大阪府大阪市1-1", source: "gbiz" });
+    const b = make({ name: "株式会社木村精機", address: "大阪府大阪市2-2", source: "gbiz" });
+    expect(dedupeObservations([a, b])).toHaveLength(2);
+  });
+
+  it("mergeCandidates が同じ観測を積み上げない", () => {
+    const base = toMerged(make({ name: "株式会社木村精機", corporateNumber: "1234567890123", source: "gbiz", sourceConfidence: 90 }));
+    const same = make({ name: "株式会社木村精機", corporateNumber: "1234567890123", source: "gbiz", sourceConfidence: 90 });
+    let merged = base;
+    for (let i = 0; i < 8; i++) merged = mergeCandidates(merged, { ...same });
+    expect(merged.observations).toHaveLength(1);
+    expect(merged.sources).toEqual(["gbiz"]);
   });
 });

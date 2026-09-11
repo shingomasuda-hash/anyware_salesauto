@@ -24,11 +24,22 @@ function sourcesOf(c: DiscoveryCandidateRow): DiscoveryProviderName[] {
   return s.length > 0 ? s : [c.primary_source];
 }
 
+/** 同一ラン内で別の情報源が同じ企業を指していたため畳まれた候補か */
+function isCrossSourceDuplicate(c: DiscoveryCandidateRow): boolean {
+  return c.status === "duplicate" && (c.reject_reason ?? "").startsWith("同一ラン内の別候補と同一企業");
+}
+
+/** 本人確認後の突き合わせで情報源を集約した側の候補か */
+function reconciledFrom(c: DiscoveryCandidateRow): string[] {
+  const raw = (c.raw_data ?? {}) as { reconciledFrom?: unknown };
+  return Array.isArray(raw.reconciledFrom) ? (raw.reconciledFrom as string[]) : [];
+}
+
 const VERDICT_LABEL: Record<string, string> = {
   verified: "確認済（企業登録）",
   needs_review: "要確認（未登録・承認待ち）",
   rejected: "対象外（未登録）",
-  duplicate: "重複（登録済み企業）",
+  duplicate: "重複（同一企業を別候補で保持）",
   failed: "失敗",
   discovered: "未確認",
   verifying: "確認中",
@@ -45,7 +56,7 @@ export async function reportDiscoveryRun(db: Db, runId: string): Promise<void> {
   await printPerCompany(db, candidates);
   printAggregates(run, counts, candidates);
   await printCompanyMetrics(db, candidates);
-  await printProviderContribution(db, candidates);
+  await printProviderContribution(db, run, candidates);
   printSafetyChecks(candidates);
 }
 
@@ -130,10 +141,13 @@ function printAggregates(
   console.log(`\n${RULE}\n【集計】\n${RULE}`);
   const { byStatus, discovered, total } = counts;
 
+  const crossSourceDup = candidates.filter(isCrossSourceDuplicate);
+  const existingDup = Math.max(0, byStatus.duplicate - crossSourceDup.length);
   console.log(`保存した候補        : 全${total}件 ＝ 新規候補 ${discovered}件 ＋ 重複 ${byStatus.duplicate}件`);
-  console.log("  ※「重複」は既に企業一覧へ登録済みのため、新規候補数には含みません（別軸の集計）");
+  console.log(`  重複の内訳        : 既に企業一覧へ登録済み ${existingDup}件 / 同一ラン内で別ソースが同じ企業を発見 ${crossSourceDup.length}件`);
+  console.log("  ※「重複」は新規候補数に含みません（別軸の集計）。二重登録ではなく、同じ企業を指す候補を畳んだ件数です。");
   console.log(`候補発見数（新規）  : ${discovered}`);
-  console.log(`重複率              : ${pct(byStatus.duplicate, total)}  ← 全候補に占める既登録企業の割合`);
+  console.log(`重複率              : ${pct(byStatus.duplicate, total)}  ← 全候補に占める「既存企業 or 同一企業の重複候補」の割合`);
   console.log(`verified率          : ${pct(byStatus.verified, discovered)}`);
   console.log(`needs_review率      : ${pct(byStatus.needs_review, discovered)}`);
   console.log(`rejected率          : ${pct(byStatus.rejected, discovered)}`);
@@ -218,11 +232,29 @@ export async function printCompanyMetrics(db: Db, candidates: DiscoveryCandidate
 // Provider 別の貢献度
 // ---------------------------------------------------------------------------
 
-async function printProviderContribution(db: Db, candidates: DiscoveryCandidateRow[]): Promise<void> {
+async function printProviderContribution(db: Db, run: DiscoveryRunRow, candidates: DiscoveryCandidateRow[]): Promise<void> {
   console.log(`\n${RULE}\n【Provider別の貢献】\n${RULE}`);
 
   const discoveryProviders: DiscoveryProviderName[] = ["gbiz", "google_places", "web_search", "edinet"];
   const newOnes = candidates.filter((c) => c.status !== "duplicate");
+
+  // 「複数ソースで一致」は実際に稼働した情報源が 2 つ以上ないと原理的に 0% になる。
+  // 0% を精度劣化と読み違えないよう、まず稼働状況を出す。
+  const stats = (run.provider_stats ?? {}) as Record<string, { requestCount?: number; skipped?: boolean; unavailableReason?: string }>;
+  console.log("情報源の稼働状況:");
+  let activeDiscovery = 0;
+  for (const p of discoveryProviders) {
+    const st = stats[p];
+    const label = (PROVIDER_LABELS[p] ?? p).padEnd(16);
+    if (!st) {
+      console.log(`  ${label} 未使用（今回の探索方法では対象外）`);
+    } else if (st.skipped) {
+      console.log(`  ${label} 停止中: ${st.unavailableReason ?? "理由不明"}`);
+    } else {
+      if ((st.requestCount ?? 0) > 0) activeDiscovery++;
+      console.log(`  ${label} 稼働（リクエスト ${st.requestCount ?? 0}回）`);
+    }
+  }
 
   console.log("Provider別 新規企業数（その情報源が発見に関与した候補）:");
   for (const p of discoveryProviders) {
@@ -248,7 +280,17 @@ async function printProviderContribution(db: Db, candidates: DiscoveryCandidateR
   }
 
   const multi = newOnes.filter((c) => sourcesOf(c).filter((x) => discoveryProviders.includes(x)).length >= 2);
-  console.log(`\n複数ソースで一致    : ${pct(multi.length, newOnes.length)}  ← 突き合わせが効いた候補`);
+  const reconciled = newOnes.filter((c) => reconciledFrom(c).length > 0);
+  console.log(`\n複数ソースで一致    : ${pct(multi.length, newOnes.length)}  ← 2つ以上の発見ソースが同じ企業を指した候補`);
+  console.log(`  うち本人確認後に一致: ${reconciled.length}件  ← 公式ドメイン / 法人番号が判明してから突き合わさった分`);
+  if (multi.length === 0) {
+    if (activeDiscovery < 2) {
+      console.log("  ※ 稼働した発見ソースが1つだけのため、突き合わせは原理的に発生しません（精度の劣化ではありません）。");
+    } else {
+      console.log("  ※ 各ソースが重ならない企業群を返したため一致なし。GビズINFO は法人番号順、Web検索は検索順位順に候補を返すため、");
+      console.log("     母集団が小さいうちは重複しにくいのが通常です。裏付けが必要な場合は取得件数を増やすか条件を狭めてください。");
+    }
+  }
 
   // Multi-Source 化の価値判定
   const gbizOnlyExclusive = exclusive.gbiz?.length ?? 0;
