@@ -307,6 +307,42 @@ export default async function CompanyDetailPage({ params, searchParams }: { para
         </Section>
       </div>
 
+      <div className="mt-4">
+        <Section
+          title="営業文（下書き）"
+          actions={
+            c.sales_contact_allowed === "unknown" ? (
+              <span className="text-xs text-amber-700">営業可否が未確認です。送信前に必ず問い合わせページを確認してください</span>
+            ) : c.sales_contact_allowed === "false" ? (
+              <span className="text-xs text-red-700">営業を断る表記が確認されています</span>
+            ) : null
+          }
+        >
+          {c.sales_contact_allowed === "false" ? (
+            <p className="text-sm text-red-700">この企業は営業をお断りしています。営業文は作成していません。</p>
+          ) : !a?.outreach_body ? (
+            <p className="text-sm text-muted-foreground">
+              営業文はまだありません。自社サービスの設定（SALES_OFFERING_SUMMARY）が入っていると、AI分析と同時に企業ごとの下書きが作られます。
+            </p>
+          ) : (
+            <div className="space-y-3">
+              <DefinitionList items={[{ label: "件名", value: a.outreach_subject ?? "—" }]} />
+              <div>
+                <div className="mb-1 text-xs text-muted-foreground">本文（そのまま送らず、必ず目を通してください）</div>
+                <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-sm">{a.outreach_body}</pre>
+              </div>
+              <div>
+                <div className="mb-1 text-xs text-muted-foreground">この企業に合わせて触れた事実</div>
+                <BulletList items={a.outreach_personalization} empty="なし" />
+              </div>
+              {a.outreach_hypothesis_note ? (
+                <p className="text-xs text-muted-foreground">推測について: {a.outreach_hypothesis_note}</p>
+              ) : null}
+            </div>
+          )}
+        </Section>
+      </div>
+
       <div className="mt-4 grid gap-4 lg:grid-cols-[2fr_1fr]">
         <Section title={`クロールページ（${pages.length}）`} actions={<span className="text-xs text-muted-foreground">最終クロール {formatDate(c.last_crawled_at, true)}</span>}>
           {pages.length === 0 ? (

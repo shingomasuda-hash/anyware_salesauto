@@ -1,3 +1,5 @@
+import type { SalesOffering } from "@/lib/config/offering";
+
 /**
  * 企業分析プロンプト。
  * 固定文（system）は Prompt Caching の対象になるよう先頭に置き、企業ごとの可変部分は user メッセージに置く。
@@ -36,6 +38,47 @@ analysis_reason には、各スコアの根拠を「確認できた事実」と�
 同じ内容を observed_facts と detected_issues の両方に書かない。
 evidence は各スコアの根拠になる代表例だけでよく、1件も無ければ空配列を返す。
 前置き・繰り返し・一般論は書かない。`;
+
+/**
+ * 営業文の指示。自社サービスの定義（企業をまたいで変わらない）を system 側に置くことで、
+ * Prompt Caching を維持したまま営業文を同じ1回の呼び出しで作らせる。
+ * 追加の API 呼び出しを発生させないため、費用の増分は出力トークンぶんだけで済む。
+ */
+export function buildSalesOutreachInstruction(offering: SalesOffering): string {
+  if (!offering.configured) {
+    return `
+
+## 営業文
+自社サービスの定義が与えられていないため、sales_outreach は null にする。`;
+  }
+  return `
+
+## 営業文（sales_outreach）
+以下の自社サービスを、この企業に向けて提案する日本語のメール下書きを作る。
+
+- 差出人: ${offering.senderCompany ?? "（未設定）"}
+- サービス名: ${offering.name ?? "（未設定）"}
+- 提供内容: ${offering.summary}
+${offering.strengths.length > 0 ? `- 提供できること: ${offering.strengths.join(" / ")}` : ""}
+${offering.cta ? `- 依頼したい次の行動: ${offering.cta}` : ""}
+
+### 守ること
+- **企業ごとに内容を変える。** その企業のサイトで確認できた事実に最低1つ触れる。
+  触れた事実は personalization に書き出す（observed_facts に書いたものと同じ表現を使う）。
+- テンプレートの穴埋めにしない。どの企業にも当てはまる文だけで構成してはいけない。
+- 確認できていないことを断定しない。課題は仮説として書き、hypothesis_note に
+  「どこまでが推測か」を1文で書く。
+- **メールアドレス・電話番号・担当者名を文面に書かない。** 与えられていない連絡先を
+  推測して作ることは禁止。宛名は「ご担当者様」にする。
+- 誇張・煽り・不安を煽る表現を使わない。断る余地を残した丁寧な文にする。
+- 営業を断る表記がサイトにあった場合は、sales_outreach を null にする。
+- 本文は 400 字程度、長くても 700 字以内。件名は 60 字以内。`;
+}
+
+/** 自社サービス定義を含めた system プロンプト（企業をまたいで同一なのでキャッシュが効く） */
+export function buildCompanyAnalysisSystemPrompt(offering: SalesOffering): string {
+  return `${COMPANY_ANALYSIS_SYSTEM_PROMPT}${buildSalesOutreachInstruction(offering)}`;
+}
 
 export function buildCompanyAnalysisUserPrompt(contextText: string): string {
   return `以下は分析対象企業の情報です。指示に従って JSON で分析結果を返してください。

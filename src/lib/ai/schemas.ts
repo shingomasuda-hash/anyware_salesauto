@@ -45,6 +45,21 @@ export const companyAnalysisOutputSchema = z.object({
     restriction_text: z.string().max(200).nullable(),
     source_url: z.string().nullable(),
   }),
+  /**
+   * 企業ごとに変える営業文の下書き。
+   * 自社サービスの定義が与えられていない場合は null を返させる
+   * （当たり障りのない一般的な文面を作らせない）。
+   */
+  sales_outreach: z
+    .object({
+      subject: z.string().max(60),
+      body: z.string().max(700),
+      /** 文面で触れたその企業固有の事実（observed_facts から。監査用） */
+      personalization: z.array(z.string().max(120)).max(3),
+      /** 推測に基づく部分があれば明示する */
+      hypothesis_note: z.string().max(150).nullable(),
+    })
+    .nullable(),
   evidence: z.array(evidenceSchema).max(8),
   analysis_reason: z.string().max(500),
   confidence_score: score,

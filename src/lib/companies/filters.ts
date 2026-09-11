@@ -42,6 +42,8 @@ export const companyFilterSchema = z.object({
   hasWebsite: flag,
   hasContact: flag,
   hasEmail: flag,
+  /** 営業文の下書きがある企業だけ（AI分析まで進んだ企業） */
+  hasOutreach: flag,
   excludeRestricted: flag,
   unanalyzed: flag,
   needsReview: flag,
@@ -100,6 +102,7 @@ export function buildCompanyWhere(f: CompanyFilters): SQL | undefined {
   if (f.hasWebsite) c.push(eq(v.has_website, true));
   if (f.hasContact) c.push(eq(v.has_contact, true));
   if (f.hasEmail) c.push(eq(v.has_email, true));
+  if (f.hasOutreach) c.push(eq(v.has_outreach, true));
   // 営業対象の絞り込みでは「不明（未確認）」も除外する。
   // 営業拒否表記を確認できていない企業を、営業可能として扱わないため。
   if (f.excludeRestricted) c.push(eq(v.sales_contact_allowed, "true"));

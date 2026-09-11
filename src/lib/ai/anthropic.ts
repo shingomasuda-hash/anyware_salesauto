@@ -2,7 +2,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { getAiConfig } from "@/lib/config/ai";
 import { requireEnv } from "@/lib/config/env";
-import { buildCompanyAnalysisUserPrompt, COMPANY_ANALYSIS_SYSTEM_PROMPT, JSON_FIX_PROMPT } from "./prompts";
+import { getSalesOffering } from "@/lib/config/offering";
+import { buildCompanyAnalysisSystemPrompt, buildCompanyAnalysisUserPrompt, JSON_FIX_PROMPT } from "./prompts";
 import type { AiProvider, AiUsage, AnalysisRequest, AnalysisResult } from "./provider";
 import { companyAnalysisOutputSchema, extractJsonObject, parseAnalysisOutput, type CompanyAnalysisOutput } from "./schemas";
 
@@ -31,7 +32,8 @@ export class AnthropicAiProvider implements AiProvider {
       const response = await this.client.messages.parse({
         model: cfg.model,
         max_tokens: cfg.maxOutputTokens,
-        system: [{ type: "text", text: COMPANY_ANALYSIS_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
+        // 自社サービス定義は企業をまたいで同一なので、system に置いてもキャッシュが効く
+        system: [{ type: "text", text: buildCompanyAnalysisSystemPrompt(getSalesOffering()), cache_control: { type: "ephemeral" } }],
         messages,
         output_config: { format: zodOutputFormat(companyAnalysisOutputSchema), effort: cfg.effort },
       });

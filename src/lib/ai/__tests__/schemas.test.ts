@@ -26,6 +26,7 @@ const valid = {
   detected_strengths: [],
   recommended_topics: ["採用LP"],
   sales_restriction: { detected: false, restriction_text: null, source_url: null },
+  sales_outreach: null,
   evidence: [{ category: "recruiting", source_url: "https://example.jp/recruit/", evidence_text: "中途採用 3職種" }],
   analysis_reason: "理由",
   confidence_score: 70,
@@ -68,5 +69,37 @@ describe("MockAiProvider", () => {
     expect(parseAnalysisOutput(res.output).ok).toBe(true);
     expect(res.output.recruiting_status).toBe("active");
     expect(res.provider).toBe("mock");
+  });
+});
+
+describe("営業文（sales_outreach）", () => {
+  const outreach = {
+    subject: "採用ページ改善のご提案",
+    body: "ご担当者様\n\n採用ページに募集職種の記載があることを拝見しご連絡しました。",
+    personalization: ["採用ページに募集職種の記載あり"],
+    hypothesis_note: "課題の想定はサイト記載からの推測です",
+  };
+
+  it("自社サービス未設定なら null を許す", () => {
+    expect(parseAnalysisOutput({ ...valid, sales_outreach: null }).ok).toBe(true);
+  });
+
+  it("営業文つきの出力を受け入れる", () => {
+    const parsed = parseAnalysisOutput({ ...valid, sales_outreach: outreach });
+    expect(parsed.ok).toBe(true);
+  });
+
+  it("件名が長すぎる場合は弾く", () => {
+    const parsed = parseAnalysisOutput({ ...valid, sales_outreach: { ...outreach, subject: "あ".repeat(61) } });
+    expect(parsed.ok).toBe(false);
+  });
+
+  it("本文が長すぎる場合は弾く", () => {
+    const parsed = parseAnalysisOutput({ ...valid, sales_outreach: { ...outreach, body: "あ".repeat(701) } });
+    expect(parsed.ok).toBe(false);
+  });
+
+  it("推測の注記は省略できる", () => {
+    expect(parseAnalysisOutput({ ...valid, sales_outreach: { ...outreach, hypothesis_note: null } }).ok).toBe(true);
   });
 });

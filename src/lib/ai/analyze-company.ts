@@ -11,6 +11,7 @@ import { computeSalesPriorityScore, rankFromScore } from "@/lib/scoring/priority
 import { employeeRangeFromCount } from "@/lib/companies/constants";
 import { getAiProvider } from "./index";
 import { buildAnalysisContext } from "./context";
+import { reviewOutreach } from "./outreach";
 import type { CompanyAnalysisOutput } from "./schemas";
 
 export interface AnalyzeCompanyResult {
@@ -72,6 +73,16 @@ export async function analyzeCompany(db: Db, companyId: string, logger: Logger):
   // 営業拒否: ルール検出 or AI 検出のいずれかで false
   const restriction = resolveSalesRestriction(company, out, pageRows);
 
+  // 営業文は「営業拒否が確認された企業には作らない」「推測した連絡先を書かせない」を機械的に担保する
+  const outreach = reviewOutreach(out.sales_outreach, {
+    salesContactAllowed: restriction.allowed,
+    knownEmails: [company.email],
+    knownPhones: [company.phone],
+  });
+  if (!outreach.ok && out.sales_outreach) {
+    await logger.warn("営業文を破棄", { company: company.company_name, reason: outreach.reason });
+  }
+
   const analysis = await insertAnalysis(db, {
       company_id: companyId,
       company_summary: out.company_summary,
@@ -97,6 +108,10 @@ export async function analyzeCompany(db: Db, companyId: string, logger: Logger):
       inferences: out.inferences as Json,
       analysis_reason: out.analysis_reason,
       confidence_score: out.confidence_score,
+      outreach_subject: outreach.ok ? outreach.draft.subject : null,
+      outreach_body: outreach.ok ? outreach.draft.body : null,
+      outreach_personalization: (outreach.ok ? outreach.draft.personalization : null) as Json,
+      outreach_hypothesis_note: outreach.ok ? outreach.draft.hypothesisNote : null,
       model: result.model,
       provider: result.provider,
       input_tokens: result.usage.inputTokens,
@@ -186,6 +201,7 @@ export async function analyzeCompany(db: Db, companyId: string, logger: Logger):
     outputTokens: result.usage.outputTokens,
     retries: result.retries,
     salesContactAllowed: restriction.allowed,
+    outreach: outreach.ok ? "作成" : outreach.reason,
   });
 
   return { analysis, salesContactAllowed: restriction.allowed };

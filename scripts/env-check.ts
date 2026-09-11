@@ -56,6 +56,12 @@ const SPECS: Spec[] = [
     showValue: true,
     fallback: "未設定でも既定の true で動作します",
   },
+  {
+    name: "SALES_OFFERING_SUMMARY",
+    need: "optional",
+    purpose: "自社サービスの内容。設定すると企業ごとの営業文を分析と同時に生成する",
+    fallback: "未設定のあいだは営業文を生成しません",
+  },
   // Live Test を成立させるために併せて必要なもの
   { name: "NEON_AUTH_BASE_URL", need: "recommended", purpose: "管理画面のログイン" },
   { name: "NEON_AUTH_COOKIE_SECRET", need: "recommended", purpose: "セッション Cookie 署名" },

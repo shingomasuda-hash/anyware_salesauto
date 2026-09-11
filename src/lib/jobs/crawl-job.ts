@@ -15,6 +15,7 @@ import { fetchHtml } from "@/lib/integrations/http/fetch";
 import { getPlacesProvider } from "@/lib/integrations/google-places";
 import { Logger, serializeError } from "@/lib/logging/logger";
 import { shouldEnqueueAnalysis } from "@/lib/ai/gate";
+import { analysisPriorityFromCrawl } from "./analysis-priority";
 import { enqueueAnalysisJob } from "./enqueue";
 
 interface StoredCandidate {
@@ -114,7 +115,10 @@ export async function processCrawlJob(db: Db, job: CrawlJobRow, logger: Logger):
   if (job.enqueue_analysis) {
     const gate = shouldEnqueueAnalysis(summary.recruitPageUrl);
     if (gate.ok) {
-      await enqueueAnalysisJob(db, company.id, { searchJobId: job.search_job_id, priority: job.priority });
+      // 月の AI 予算に上限があるため、見込みの高い企業から分析されるように順番をつける
+      const priority = analysisPriorityFromCrawl(summary, update.email ?? null, update.phone ?? null);
+      await enqueueAnalysisJob(db, company.id, { searchJobId: job.search_job_id, priority });
+      await logger.info("AI分析をキューに投入", { company: company.company_name, priority });
     } else {
       await logger.info(gate.reason ?? "AI分析を見送り", { company: company.company_name });
     }

@@ -41,6 +41,18 @@ const envSchema = z.object({
     .default("true")
     .transform((v) => v === "true"),
 
+  // --- 営業文の生成（自社が何を売るのか） ---
+  /** 差出人の会社名 */
+  SALES_SENDER_COMPANY: optionalString,
+  /** サービス名 */
+  SALES_OFFERING_NAME: optionalString,
+  /** 何を提供するか。未設定なら営業文を生成しない */
+  SALES_OFFERING_SUMMARY: optionalString,
+  /** 強み・提供できること（| 区切り） */
+  SALES_OFFERING_STRENGTHS: optionalString,
+  /** 依頼したい次の行動 */
+  SALES_OFFERING_CTA: optionalString,
+
   GBIZ_API_KEY: optionalString,
   GOOGLE_MAPS_API_KEY: optionalString,
   BRAVE_SEARCH_API_KEY: optionalString,

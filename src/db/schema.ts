@@ -155,6 +155,11 @@ export const companyAnalysis = pgTable(
     inferences: jsonArray("inferences"),
     analysis_reason: text("analysis_reason"),
     confidence_score: integer("confidence_score"),
+    // 企業ごとの営業文（分析と同じ1回の Claude 呼び出しで生成する）
+    outreach_subject: text("outreach_subject"),
+    outreach_body: text("outreach_body"),
+    outreach_personalization: jsonArray("outreach_personalization"),
+    outreach_hypothesis_note: text("outreach_hypothesis_note"),
     model: text("model"),
     provider: text("provider").notNull().default("anthropic"),
     input_tokens: integer("input_tokens"),
@@ -639,6 +644,9 @@ export const companyOverview = pgView("company_overview", {
   sales_priority_rank: text("sales_priority_rank").$type<SalesRank>(),
   confidence_score: integer("confidence_score"),
   analyzed_at: ts("analyzed_at"),
+  outreach_subject: text("outreach_subject"),
+  outreach_body: text("outreach_body"),
+  has_outreach: boolean("has_outreach").notNull(),
 }).existing();
 
 // =============================================================

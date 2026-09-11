@@ -29,6 +29,13 @@
       "when": 1788947936919,
       "tag": "0003_discovery_functions",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788947936920,
+      "tag": "0004_sales_outreach",
+      "breakpoints": true
     }
   ]
 }
