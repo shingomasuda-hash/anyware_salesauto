@@ -22,6 +22,7 @@
     "preflight": "tsx scripts/preflight.ts",
     "env:check": "tsx scripts/env-check.ts",
     "ai:cost": "tsx scripts/ai-cost.ts",
+    "reanalyze": "tsx scripts/reanalyze.ts",
     "test:real": "tsx scripts/test-real.ts",
     "verify": "tsx scripts/verify.ts",
     "discovery": "tsx scripts/discovery.ts",

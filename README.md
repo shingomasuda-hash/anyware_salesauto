@@ -607,6 +607,19 @@ Prompt Caching が効いたまま文面を追加できます。
 企業詳細ページの「取材依頼文（下書き）」で、件名・本文・**その企業に合わせて触れた事実**を確認できます。
 CSV にも「文面件名」「文面本文」列が入ります。一覧の「文面あり」で絞り込めます。
 
+#### 文面を変えたあとに作り直す
+
+テーマや設定を変えても、**すでに保存済みの文面は変わりません**。作り直す企業を指定して
+分析ジョブを投入します。実費がかかるため `--apply` を付けない限り投入しません。
+
+```bash
+npm run reanalyze                            # 対象と概算費用を表示するだけ
+npm run reanalyze -- --limit 3 --apply       # まず3社だけ試す
+npm run reanalyze -- --rank A --apply        # 営業ランクAだけ
+npm run reanalyze -- --prefecture 京都府 --apply
+npm run jobs:run -- --drain                  # 投入したジョブを処理する
+```
+
 ### AI予算が上限に達したときの動き
 
 `AI_MONTHLY_BUDGET_JPY` に達すると AI 分析だけが止まります。
