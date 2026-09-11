@@ -28,22 +28,28 @@ export interface DedupeMatch {
 /**
  * 純粋関数版の重複判定。優先順位: 法人番号 > ドメイン > 企業名+所在地
  * DB クエリを伴う版 (findDuplicateCompany) はこの関数を利用する。
+ *
+ * 法人番号が両方にあって値が違う相手は、どの根拠でも同一企業とみなさない。
+ * 法人番号は Source of Truth であり、社名や住所の一致より強い。
  */
 export function matchDuplicate(candidate: DedupeCandidate, existing: DedupeExisting[]): DedupeMatch | null {
   const cn = candidate.corporateNumber ?? null;
+  // 別法人と断定できる相手を先に除く
+  const pool = cn ? existing.filter((e) => !e.corporate_number || e.corporate_number === cn) : existing;
+
   if (cn) {
-    const hit = existing.find((e) => e.corporate_number === cn);
+    const hit = pool.find((e) => e.corporate_number === cn);
     if (hit) return { id: hit.id, reason: "corporate_number" };
   }
   const domain = candidate.websiteDomain ?? null;
   if (domain) {
-    const hit = existing.find((e) => e.website_domain === domain);
+    const hit = pool.find((e) => e.website_domain === domain);
     if (hit) return { id: hit.id, reason: "website_domain" };
   }
   const nameNorm = normalizeCompanyName(candidate.companyName);
   const addrNorm = normalizeAddress(candidate.address);
   if (nameNorm && addrNorm) {
-    const hit = existing.find((e) => e.company_name_normalized === nameNorm && e.address_normalized === addrNorm);
+    const hit = pool.find((e) => e.company_name_normalized === nameNorm && e.address_normalized === addrNorm);
     if (hit) return { id: hit.id, reason: "name_address" };
   }
   return null;

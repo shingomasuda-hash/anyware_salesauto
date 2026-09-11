@@ -135,3 +135,50 @@ describe("dedupeObservations", () => {
     expect(merged.sources).toEqual(["gbiz"]);
   });
 });
+
+describe("法人番号が違う企業を統合しない", () => {
+  // 実データ検証で「増子製作所」という同名の9法人（東京2社・大阪7社）が
+  // 1社に畳まれ、8社が営業リストから消えていた。
+  // 法人番号は Source of Truth であり、社名の類似より強い。
+  const osaka = toMerged(
+    make({ name: "株式会社増子製作所", corporateNumber: "1120001003245", address: "大阪府大阪市鶴見区1-1-1", source: "gbiz", sourceConfidence: 90 }),
+  );
+
+  it("同名でも法人番号が違えば別企業", () => {
+    const tokyo = make({ name: "株式会社増子製作所", corporateNumber: "1010401144815", address: "東京都墨田区1-1-1", source: "gbiz", sourceConfidence: 90 });
+    expect(findDuplicate(tokyo, [osaka])).toBeNull();
+  });
+
+  it("同じ市区町村でも法人番号が違えば別企業", () => {
+    const other = make({ name: "株式会社増子製作所", corporateNumber: "1122001003563", address: "大阪府大阪市鶴見区2-2-2", source: "gbiz", sourceConfidence: 90 });
+    expect(findDuplicate(other, [osaka])).toBeNull();
+  });
+
+  it("同じドメインでも法人番号が違えば別企業", () => {
+    const withDomain = toMerged(make({ name: "株式会社増子製作所", corporateNumber: "1120001003245", website: "https://masuko.co.jp", source: "gbiz", sourceConfidence: 90 }));
+    const other = make({ name: "増子製作所", corporateNumber: "1010401144815", website: "https://masuko.co.jp", source: "web_search" });
+    expect(findDuplicate(other, [withDomain])).toBeNull();
+  });
+
+  it("法人番号が一致すれば統合する", () => {
+    const same = make({ name: "増子製作所", corporateNumber: "1120001003245", source: "web_search" });
+    expect(findDuplicate(same, [osaka])?.reason).toBe("corporate_number");
+  });
+
+  it("片方に法人番号が無ければ従来どおり照合する", () => {
+    const noNumber = make({ name: "株式会社増子製作所", address: "大阪府大阪市鶴見区1-1-1", source: "web_search" });
+    expect(findDuplicate(noNumber, [osaka])?.reason).toBe("name_address");
+  });
+
+  it("市区町村が分からない候補は表記ゆれで統合しない", () => {
+    // 市区町村が両方そろって一致することを必須にする（同名の別法人を守る）
+    const vague = make({ name: "増子製作所", source: "web_search" });
+    expect(findDuplicate(vague, [osaka])).toBeNull();
+  });
+
+  it("同一市区町村の表記ゆれは統合する", () => {
+    const variant = make({ name: "増子製作所", address: "大阪府大阪市鶴見区1-1-1", source: "web_search" });
+    const dup = findDuplicate(variant, [osaka]);
+    expect(dup).not.toBeNull();
+  });
+});

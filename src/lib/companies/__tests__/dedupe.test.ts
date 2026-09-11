@@ -53,3 +53,30 @@ describe("既存企業への識別情報の書き戻し", () => {
     expect(hit).toEqual({ id: "c1", reason: "corporate_number" });
   });
 });
+
+describe("法人番号が違う企業を同一視しない（companies 側）", () => {
+  const existing = [
+    { id: "osaka", corporate_number: "1120001003245", website_domain: "masuko.co.jp", company_name_normalized: "増子製作所", address_normalized: "大阪府大阪市鶴見区1-1-1" },
+  ];
+
+  it("同名・同住所でも法人番号が違えば別企業", () => {
+    const tokyo = { corporateNumber: "1010401144815", companyName: "株式会社増子製作所", address: "大阪府大阪市鶴見区1-1-1" };
+    expect(matchDuplicate(tokyo, existing)).toBeNull();
+  });
+
+  it("同じドメインでも法人番号が違えば別企業", () => {
+    const other = { corporateNumber: "1010401144815", companyName: "株式会社増子製作所", websiteDomain: "masuko.co.jp" };
+    expect(matchDuplicate(other, existing)).toBeNull();
+  });
+
+  it("法人番号が一致すれば同一企業", () => {
+    const same = { corporateNumber: "1120001003245", companyName: "増子製作所" };
+    expect(matchDuplicate(same, existing)).toEqual({ id: "osaka", reason: "corporate_number" });
+  });
+
+  it("既存側に法人番号が無ければ住所で照合する", () => {
+    const noNumberExisting = [{ ...existing[0], corporate_number: null }];
+    const candidate = { corporateNumber: "1010401144815", companyName: "株式会社増子製作所", address: "大阪府大阪市鶴見区1-1-1" };
+    expect(matchDuplicate(candidate, noNumberExisting)?.reason).toBe("name_address");
+  });
+});

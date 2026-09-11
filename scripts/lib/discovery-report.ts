@@ -339,12 +339,25 @@ async function printProviderContribution(db: Db, run: DiscoveryRunRow, candidate
   console.log(`  （参考: GビズINFO のみで見つかった企業 = ${gbizOnlyExclusive}件）`);
 
   // 情報源の記録が企業側にも残っているか
-  const registered = candidates.filter((c) => c.status === "verified" && c.company_id).slice(0, 3);
+  const registered = candidates.filter((c) => c.status === "verified" && c.company_id);
   if (registered.length > 0) {
     console.log("\ncompany_sources の記録例:");
-    for (const c of registered) {
+    for (const c of registered.slice(0, 3)) {
       const sources = await listCompanySources(db, c.company_id!);
       console.log(`  ${c.name}: ${sources.map((s) => `${PROVIDER_LABELS[s.provider] ?? s.provider}(${s.confidence})`).join(", ") || "なし"}`);
+    }
+
+    // 1社に複数の法人番号が紐づいていたら、別法人を統合してしまっている
+    const mixed: { name: string; numbers: string[] }[] = [];
+    for (const c of registered) {
+      const sources = await listCompanySources(db, c.company_id!);
+      const numbers = [...new Set(sources.filter((s) => s.provider === "gbiz" && s.external_id).map((s) => s.external_id!))];
+      if (numbers.length > 1) mixed.push({ name: c.name, numbers });
+    }
+    if (mixed.length > 0) {
+      console.log(`\n⚠️ 1社に複数の法人番号が紐づいています（別法人の統合）: ${mixed.length}件`);
+      for (const m of mixed.slice(0, 5)) console.log(`  ${m.name}: ${m.numbers.join(", ")}`);
+      console.log("  → 法人番号ごとに別企業として登録されるべきものです");
     }
   }
 }

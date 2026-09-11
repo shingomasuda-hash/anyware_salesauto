@@ -23,6 +23,10 @@ export const NON_OFFICIAL_DOMAINS: string[] = [
   // 50社検証で公式サイト候補に現れたディレクトリ・地図・プレスリリースサイト
   "goo.ne.jp", "townpage.goo.ne.jp", "map.goo.ne.jp", "buzip.net", "e-shops.jp",
   "bigcompany.jp", "jpubb.com", "i-o-m.jp", "bsj.jp", "ekiten.jp", "mapfan.com",
+  // 法人情報DB（実データ検証で公式サイトとして誤採用されていたもの）
+  "kaisharesearch.com", "g-search.or.jp", "cnavi.g-search.or.jp", "always-basics.com",
+  "companyinformation.jp", "compalyze.co.jp", "helloboss.com", "baseconnect.in",
+  "salesnow.jp", "musubu.in", "ullet.com", "alarmbox.jp", "tdb.co.jp", "tsr-net.co.jp",
   "its-mo.com", "navitime.com", "loco.yahoo.co.jp", "tel-search.jp",
 ];
 
@@ -38,7 +42,9 @@ export function isNonHtmlUrl(url: string | null): boolean {
 /** 法人番号（13桁）をパスに含む URL は法人情報データベースとみなす */
 export function looksLikeCorporateDatabaseUrl(url: string | null): boolean {
   if (!url) return false;
-  return /\/\d{13}(\/|\?|#|$)/.test(url) || /(houjin|hojin|corporate[-_]?number|corpnumber)/i.test(url);
+  // URL に13桁（法人番号）が現れるページは、企業の公式サイトではなく法人情報DBの詳細ページ。
+  // 末尾が .html のもの（/detail/1120001003996.html）も拾えるよう区切りを限定しない。
+  return /\d{13}/.test(url) || /(houjin|hojin|corporate[-_]?number|corpnumber|kaisha|company[-_]?search)/i.test(url);
 }
 
 /** 自治体・官公庁のドメイン（公式サイト候補にしない） */
