@@ -14,6 +14,7 @@ import { getDiscoveryConfig, scaleBudgetForRequest } from "@/lib/config/discover
 import { normalizeAddress } from "@/lib/companies/normalize";
 import { aggregateCandidates } from "@/lib/discovery/aggregator";
 import { createBudgetTracker, emptyProviderStat, mergeProviderStats } from "@/lib/discovery/budget";
+import { decideAutoReview } from "@/lib/discovery/auto-review";
 import { dedupeObservations, toMerged } from "@/lib/discovery/deduplicator";
 import { promoteCandidate, rowToMerged } from "@/lib/discovery/promote";
 import { planFallbackQueries, planQueries } from "@/lib/discovery/query-planner";
@@ -370,8 +371,29 @@ async function verifyOne(
 
   if (verification.status === "verified") officialStat.verifiedCount += 1;
 
+  // needs_review は人の確認を待たずに決める（確認待ちの行列を作らない）。
+  // 判断基準は「公式サイトを確認できているか」の一点。
+  let status = verification.status;
+  let autoReviewReason: string | null = null;
+  let reviewedBy: string | null = null;
+  if (status === "needs_review" && getDiscoveryConfig().autoReview) {
+    const decision = decideAutoReview({
+      verificationScore: verification.score,
+      officialSiteConfidence: check.confidence,
+      website: merged.website,
+    });
+    status = decision.action === "promote" ? "verified" : "rejected";
+    autoReviewReason = decision.reason;
+    // 人の承認と区別できるように記録する（自動で通したことを後から追える）
+    reviewedBy = "auto";
+    if (status === "verified") officialStat.verifiedCount += 1;
+    await context.log("info", "確認待ちの候補を自動判定", { candidate: merged.name, action: decision.action, reason: decision.reason });
+  }
+
   await updateCandidate(db, row.id, {
-    status: verification.status,
+    status,
+    reviewed_by: reviewedBy,
+    reviewed_at: reviewedBy ? new Date().toISOString() : null,
     verification_score: verification.score,
     verification_signals: verification.signals as unknown as Json,
     official_site_confidence: check.confidence,
@@ -387,7 +409,12 @@ async function verifyOne(
     prefecture: merged.prefecture,
     city: merged.city,
     phone: merged.phone,
-    reject_reason: verification.status === "rejected" ? `本人確認スコアが不足（${verification.score}点）: ${verification.unmatched.join(" / ")}` : null,
+    reject_reason:
+      autoReviewReason && status === "rejected"
+        ? autoReviewReason
+        : verification.status === "rejected"
+          ? `本人確認スコアが不足（${verification.score}点）: ${verification.unmatched.join(" / ")}`
+          : null,
     raw_data: { observations: merged.observations, officialSite: { url: check.url, reasons: check.reasons } } as unknown as Json,
   });
   return { stats };

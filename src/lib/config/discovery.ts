@@ -48,6 +48,11 @@ export function getDiscoveryConfig() {
       officialSource: 10,
     } satisfies VerificationWeights,
     thresholds: { verified: 80, needsReview: 60 } satisfies VerificationThresholds,
+    /**
+     * needs_review の候補を人の確認を待たずに自動判定する。
+     * 無効にすると /review で1件ずつ承認する運用に戻る（DISCOVERY_AUTO_REVIEW=false）。
+     */
+    autoReview: env.DISCOVERY_AUTO_REVIEW ?? true,
     /** 1 回の Discovery Run の上限。API 料金事故を防ぐ */
     budget: {
       maxProviderRequests: env.DISCOVERY_MAX_PROVIDER_REQUESTS,

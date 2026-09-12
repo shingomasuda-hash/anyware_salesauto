@@ -40,6 +40,13 @@ export const MAINTENANCE_STEPS: MaintenanceStep[] = [
     applyArgs: ["--apply"],
   },
   {
+    // 昇格で企業が増えるため、URLの再点検より前に置く（同じ実行内で点検されるようにする）
+    title: "確認待ちの候補の自動判定（公式サイト確認済みなら追加、それ以外は見送り）",
+    script: "auto-review.ts",
+    args: [],
+    applyArgs: ["--apply"],
+  },
+  {
     title: "公式サイトURLの再点検（法人情報DB・名簿ページを外す）",
     script: "recheck-sites.ts",
     args: [],

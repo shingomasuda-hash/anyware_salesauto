@@ -73,6 +73,11 @@ const envSchema = z.object({
 
   // --- Multi-Source Discovery ---
   DISCOVERY_MODE: z.enum(["gbiz", "places", "search", "hybrid"]).optional(),
+  /** needs_review の候補を人の確認を待たず自動で判定する（既定: 有効） */
+  DISCOVERY_AUTO_REVIEW: z
+    .enum(["true", "false"])
+    .optional()
+    .transform((v) => v !== "false"),
   DISCOVERY_MAX_PROVIDER_REQUESTS: z.coerce.number().int().positive().default(60),
   DISCOVERY_MAX_CANDIDATES: z.coerce.number().int().positive().default(600),
   DISCOVERY_MAX_VERIFICATION_REQUESTS: z.coerce.number().int().positive().default(300),

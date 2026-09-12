@@ -57,3 +57,10 @@ describe("対象条件の共有", () => {
     }
   });
 });
+
+describe("確認待ちの自動判定", () => {
+  it("昇格でcompaniesが増えるため、URL再点検より前に実行する", () => {
+    expect(index("auto-review.ts")).toBeGreaterThanOrEqual(0);
+    expect(index("auto-review.ts")).toBeLessThan(index("recheck-sites.ts"));
+  });
+});

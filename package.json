@@ -16,6 +16,7 @@
     "maintain": "tsx scripts/maintain.ts",
     "db:verify": "tsx scripts/check-schema.ts",
     "db:recheck-sites": "tsx scripts/recheck-sites.ts",
+    "db:auto-review": "tsx scripts/auto-review.ts",
     "db:dedupe-sources": "tsx scripts/dedupe-company-sources.ts",
     "db:repair-candidates": "tsx scripts/repair-candidates.ts",
     "db:studio": "drizzle-kit studio",

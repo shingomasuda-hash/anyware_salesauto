@@ -25,7 +25,12 @@ export const RECRUIT_TARGET_OPTIONS: { key: RecruitTarget; label: string; descri
 ];
 
 /** 求人媒体。公式サイトに採用ページが無くても、ここへのリンクがあれば採用はしている */
-const JOB_BOARDS: { domain: RegExp; name: string }[] = [
+/**
+ * 求人媒体のドメイン。
+ * 求人媒体は企業の公式サイトではないため、公式サイト判定でも同じ一覧を使う
+ * （official-site.ts の isJobBoardDomain）。一覧を2か所に分けると片方だけ古くなる。
+ */
+export const JOB_BOARDS: { domain: RegExp; name: string }[] = [
   { domain: /(^|\.)indeed\.com$/i, name: "Indeed" },
   { domain: /(^|\.)rikunabi\.com$|(^|\.)next\.rikunabi\.com$/i, name: "リクナビ" },
   { domain: /(^|\.)mynavi\.jp$/i, name: "マイナビ" },

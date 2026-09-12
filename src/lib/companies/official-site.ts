@@ -1,4 +1,5 @@
 import { addressAppearsIn, extractDomain, normalizeCompanyName, normalizePhone, normalizeUrl, stripCorporateSuffix, toHalfWidth } from "./normalize";
+import { JOB_BOARDS } from "./recruit-target";
 
 /** 公式サイトとして扱わないドメイン（求人媒体・SNS・企業DB・地図等） */
 export const NON_OFFICIAL_DOMAINS: string[] = [
@@ -99,6 +100,12 @@ const GOVERNMENT_DOMAIN_PATTERNS = [/\.lg\.jp$/, /\.go\.jp$/, /(^|\.)city\.[^.]+
  */
 const ORGANIZATION_DOMAIN_PATTERNS = [/\.or\.jp$/, /\.gr\.jp$/, /\.ac\.jp$/, /\.ed\.jp$/];
 
+/** 求人媒体のドメインか（採用状況の判定と同じ一覧を使う） */
+export function isJobBoardDomain(domain: string | null): boolean {
+  if (!domain) return false;
+  return JOB_BOARDS.some((b) => b.domain.test(domain));
+}
+
 /** 団体・学校専用ドメインか */
 export function isOrganizationDomain(domain: string | null): boolean {
   if (!domain) return false;
@@ -120,6 +127,7 @@ export function rejectOfficialSiteUrl(url: string | null): string | null {
   const domain = extractDomain(url);
   if (!domain) return "URL が不正です";
   if (isNonOfficialDomain(domain)) return `公式サイトにならないドメイン（${domain}）`;
+  if (isJobBoardDomain(domain)) return `求人媒体のドメイン（${domain}）`;
   if (isOrganizationDomain(domain)) return `団体・学校専用ドメイン（${domain}）`;
   if (looksLikeCorporateDatabaseUrl(url)) return "法人情報データベースのページ";
   if (looksLikeDirectoryPageUrl(url)) return "企業ディレクトリ・名簿のページ";
