@@ -26,7 +26,6 @@ select
   c.instagram_url, c.facebook_url, c.x_url, c.youtube_url, c.linkedin_url, c.tiktok_url,
   c.source, c.official_site_confidence, c.verification_status, c.sales_contact_allowed,
   c.crawl_status, c.analysis_status, c.created_at, c.updated_at, c.last_crawled_at, c.last_analyzed_at,
-  c.recruit_target, c.job_boards,
   (c.website_url is not null) as has_website,
   (c.recruit_page_url is not null) as has_recruit_page,
   (c.email is not null or c.contact_page_url is not null or c.contact_form_url is not null or c.phone is not null) as has_contact,
@@ -37,6 +36,9 @@ select
   a.digital_marketing_score, a.dx_opportunity_score, a.growth_potential_score,
   a.sales_priority_score, a.sales_priority_rank, a.confidence_score, a.analyzed_at,
   a.outreach_subject, a.outreach_body,
-  (a.outreach_body is not null) as has_outreach
+  (a.outreach_body is not null) as has_outreach,
+  -- 新しい列は必ず末尾に追加する。
+  -- CREATE OR REPLACE VIEW は既存の列の途中に列を挿入できない（PostgreSQL の制約）。
+  c.recruit_target, c.job_boards
 from public.companies c
 left join public.company_analysis a on a.id = c.latest_analysis_id;

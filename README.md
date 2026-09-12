@@ -357,11 +357,18 @@ Brave 以外へ差し替える場合はこの interface を実装するだけで
 | `npm run db:migrate` | `drizzle/` の未適用マイグレーションを `DATABASE_URL` の DB に適用 |
 | `npm run db:generate` | `src/db/schema.ts` の変更から SQL マイグレーションを生成 |
 | `npm run db:generate -- --custom --name xxx` | 関数・ビュー等を手書きする空のマイグレーションを作成 |
+| `npm run db:verify` | DB のスキーマがコードの期待と一致しているか確認（`db:migrate` の直後に実行する） |
 | `npm run db:check` | マイグレーションの整合性チェック |
 | `npm run db:studio` | Drizzle Studio（ブラウザで DB を閲覧） |
 
 **スキーマ変更の流れ**: `src/db/schema.ts` を編集 → `npm run db:generate` → 生成された SQL を確認 → `npm run db:migrate`。
 ビューや PostgreSQL 関数を変更する場合は `--custom` で空ファイルを作り SQL を記述します（`drizzle/0001_functions.sql` 参照）。
+
+**ビューに列を追加するときの注意**: `CREATE OR REPLACE VIEW` は
+**既存の列の途中に列を挿入できません**（PostgreSQL の制約。列名・順序・型が一致し、末尾への追加のみ許されます）。
+途中に入れると `cannot change name of view column` でマイグレーション全体がロールバックし、
+`db:migrate` は成功したように見えてカラムが作られません。新しい列は必ず `select` の**末尾**に足してください。
+適用後は `npm run db:verify` で確認できます。
 
 **ローカル PostgreSQL で動かす場合**: `DATABASE_URL=postgres://user:pass@127.0.0.1:5432/anyware` のように Neon 以外のホストを指定すると、自動的に `pg` ドライバに切り替わります（マイグレーション・アプリとも同じ手順）。
 
@@ -677,6 +684,7 @@ npm run ai:cost            # Claude API の実使用量と費用（記録済み�
 npm run ai:cost -- --project 50   # 実績平均から50社分の費用を予測（円換算つき）
 npm run env:check          # Live 実行に必要な環境変数の充足チェック（値は表示しません）
 npm run discovery:verify   # 直近の探索ランを検証（企業ごとの結果・精度指標・Provider別貢献・安全検査）
+npm run db:verify          # DBのスキーマがコードの期待と一致しているか確認（db:migrate の直後に実行）
 npm run db:dedupe-sources  # company_sources の重複行を掃除（--apply で削除 / --inspect で中身を確認）
 npm run db:repair-candidates # 企業登録済みなのに failed のままの候補を verified に戻す（--apply）
 npm run jobs:run -- --drain  # キューに残ったクロール・AI分析を処理しきってから終了
