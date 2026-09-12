@@ -13,6 +13,7 @@
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "maintain": "tsx scripts/maintain.ts",
     "db:verify": "tsx scripts/check-schema.ts",
     "db:recheck-sites": "tsx scripts/recheck-sites.ts",
     "db:dedupe-sources": "tsx scripts/dedupe-company-sources.ts",

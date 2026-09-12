@@ -378,6 +378,7 @@ Brave 以外へ差し替える場合はこの interface を実装するだけで
 | `npm run db:generate` | `src/db/schema.ts` の変更から SQL マイグレーションを生成 |
 | `npm run db:generate -- --custom --name xxx` | 関数・ビュー等を手書きする空のマイグレーションを作成 |
 | `npm run db:verify` | DB のスキーマがコードの期待と一致しているか確認（`db:migrate` の直後に実行する） |
+| `npm run maintain` | 保守処理（スキーマ確認→データ修復→URL再点検→再クロール→キュー処理）を正しい順番でまとめて実行 |
 | `npm run test:db` | 実 PostgreSQL に対して生SQL・ビュー・マイグレーションを通す統合テスト |
 | `npm run db:check` | マイグレーションの整合性チェック |
 | `npm run db:studio` | Drizzle Studio（ブラウザで DB を閲覧） |
@@ -657,6 +658,29 @@ Prompt Caching が効いたまま文面を追加できます。
 企業詳細ページの「取材依頼文（下書き）」で、件名・本文・**その企業に合わせて触れた事実**を確認できます。
 CSV にも「文面件名」「文面本文」列が入ります。一覧の「文面あり」で絞り込めます。
 
+#### 保守はこの1コマンドにまとめてあります
+
+データを直すコマンドは順番に意味があります（特に**公式サイトURLの再点検は再クロールより前**。
+逆にすると公式サイトでないURLを20ページずつ読みに行きます）。
+順番を間違えないよう、1コマンドにまとめてあります。
+
+```bash
+npm run maintain             # 何が起きるかを表示するだけ（DBは変更しません）
+npm run maintain -- --apply  # 実際に直して、キューを処理しきります
+```
+
+実行順は以下で固定しています（`src/lib/maintenance/steps.ts`、順番はテストで固定）。
+
+1. スキーマ確認（`db:verify`）— 失敗したらここで止まります
+2. 登録に失敗したまま残っている候補の復旧（`db:repair-candidates`）
+3. 出典の重複整理（`db:dedupe-sources`）
+4. 公式サイトURLの再点検（`db:recheck-sites`）
+5. 採用状況が未判定の企業の再クロール投入（`recrawl -- --missing-target`）
+6. キューの処理（`jobs:run -- --drain`）— `--apply` のときだけ
+
+AI 分析には実費がかかるため `maintain` では投入しません。必要なときだけ `npm run reanalyze` を使ってください。
+以下は各ステップを単体で実行したい場合の説明です。
+
 #### 公式サイトの判定を厳しくしたあとに既存データへ反映する
 
 公式サイトの判定基準は実データ検証で何度も厳しくしてきましたが、
@@ -739,6 +763,7 @@ npm run ai:cost            # Claude API の実使用量と費用（記録済み�
 npm run ai:cost -- --project 50   # 実績平均から50社分の費用を予測（円換算つき）
 npm run env:check          # Live 実行に必要な環境変数の充足チェック（値は表示しません）
 npm run discovery:verify   # 直近の探索ランを検証（企業ごとの結果・精度指標・Provider別貢献・安全検査）
+npm run maintain           # 保守処理をまとめて確認（--apply で実行）。順番を間違えないようこれを使う
 npm run db:verify          # DBのスキーマがコードの期待と一致しているか確認（db:migrate の直後に実行）
 npm run db:recheck-sites   # 登録済みの公式サイトURLを現在の基準で再点検（--apply で外す）
 npm run db:dedupe-sources  # company_sources の重複行を掃除（--apply で削除 / --inspect で中身を確認）

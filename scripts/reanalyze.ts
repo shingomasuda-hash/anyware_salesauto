@@ -23,6 +23,7 @@ import { enqueueAnalysisJob } from "../src/lib/jobs/enqueue";
 import { getMonthlySpend } from "../src/lib/ai/pricing";
 import { getOutreachConfig, outreachLabel, outreachMissingHint } from "../src/lib/config/outreach";
 import { getEnv } from "../src/lib/config/env";
+import { IS_ANALYZABLE } from "../src/lib/maintenance/targets";
 
 type Row = { id: string; company_name: string; prefecture: string | null; sales_priority_rank: string | null; has_outreach: boolean };
 
@@ -55,12 +56,7 @@ async function main() {
     db,
     sql`select id, company_name, prefecture, sales_priority_rank, has_outreach
         from company_overview
-        where (recruit_target is null or recruit_target <> 'no_signal')
-          and sales_contact_allowed <> 'false'
-          -- 分析はクロール済みページを材料にするため、未クロールの企業を投入しても必ず失敗する
-          and website_url is not null
-          and verification_status in ('verified','manual')
-          and crawl_status = 'crawled'
+        where ${sql.raw(IS_ANALYZABLE)}
           ${prefecture ? sql`and prefecture = ${prefecture}` : sql``}
           ${rank ? sql`and sales_priority_rank = ${rank}` : sql``}
         order by sales_priority_score desc nulls last, created_at desc

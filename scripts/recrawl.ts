@@ -20,6 +20,7 @@ import { sql } from "drizzle-orm";
 import { getDb, rawRows } from "../src/db";
 import { enqueueCrawlJob } from "../src/lib/jobs/enqueue";
 import { recheckSiteUrl } from "../src/lib/companies/site-recheck";
+import { IS_RECRAWLABLE } from "../src/lib/maintenance/targets";
 
 type Row = { id: string; company_name: string; prefecture: string | null; recruit_target: string | null; website_url: string | null };
 
@@ -40,8 +41,7 @@ async function main() {
     db,
     sql`select id, company_name, prefecture, recruit_target, website_url
         from companies
-        where website_url is not null
-          and verification_status in ('verified','manual')
+        where ${sql.raw(IS_RECRAWLABLE)}
           ${missingTarget ? sql`and recruit_target is null` : sql``}
           ${prefecture ? sql`and prefecture = ${prefecture}` : sql``}
         order by updated_at desc
