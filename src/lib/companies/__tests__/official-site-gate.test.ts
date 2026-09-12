@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   OFFICIAL_SITE_THRESHOLD,
   checkDomainOwnership,
+  companyCoreName,
   isOrganizationDomain,
+  looksLikeRecordPageUrl,
   rejectOfficialSiteUrl,
   scoreOfficialSiteCandidate,
 } from "../official-site";
@@ -85,22 +87,31 @@ describe("再点検とスコアリングの判定が一致する", () => {
 });
 
 describe("checkDomainOwnership（ドメインの持ち主の確認）", () => {
-  it("団体のトップページ配下のページは公式サイトにしない", () => {
+  it("企業を並べた団体サイトの配下ページは公式サイトにしない", () => {
+    // ポータルのトップページには掲載企業が並ぶ。それを根拠に落とす。
     const result = checkDomainOwnership({
       companyName: "株式会社大進鉄工所",
       url: "https://kobe-sugureta.jp/company/daishin/",
-      rootTitle: "神戸のすぐれた技術",
-      rootText: "神戸市の優れた技術を紹介するサイトです。",
+      rootTitle: "神戸のすぐれた技術｜掲載企業一覧",
+      rootText: [
+        "株式会社アルファ工業",
+        "株式会社ベータ製作所",
+        "有限会社ガンマ精機",
+        "株式会社デルタ鉄工",
+        "株式会社イプシロン機械",
+        "有限会社ゼータ金属",
+      ].join(" / "),
     });
     expect(result.owned).toBe(false);
   });
 
-  it("求人媒体の企業ページは公式サイトにしない", () => {
+  it("1社ごとに識別子を振るページは、トップページを見る前に落とす", () => {
+    // ポータルの1件分のページは URL の形で分かるため、トップページの内容に依存しない
     const result = checkDomainOwnership({
-      companyName: "株式会社マサダ製作所",
-      url: "https://en-gage.net/masada/",
-      rootTitle: "engage（エンゲージ）｜求人管理",
-      rootText: "engage は無料で使える採用支援ツールです。",
+      companyName: "菅原精機株式会社",
+      url: "https://www.monodukuri-kyoto.jp/company/4630/",
+      rootTitle: "京都のものづくり",
+      rootText: "ものづくり企業をご紹介します。",
     });
     expect(result.owned).toBe(false);
   });
@@ -150,5 +161,93 @@ describe("法人情報DBの判定はホスト名で行う", () => {
 
   it("法人番号が含まれる URL は落とす", () => {
     expect(rejectOfficialSiteUrl("https://example.com/detail/1120001003996.html")).not.toBeNull();
+  });
+});
+
+describe("自社・グループのドメインを名簿と誤判定しない", () => {
+  // 実データで3社の自社ドメインを誤って外した。companyNameTokens は英字しか
+  // 抽出しないため日本語社名では常に空になり、「トップページに社名が完全一致で
+  // 出るか」だけに依存していたのが原因。
+  it("社名を画像で出している自社サイトは落とさない", () => {
+    const result = checkDomainOwnership({
+      companyName: "大東プレス工業株式会社",
+      url: "http://www.daito-press.co.jp/company",
+      rootTitle: "プレス加工・金型設計",
+      rootText: "高精度なプレス加工でお応えします。製品情報 会社案内 お問い合わせ",
+    });
+    expect(result.owned).toBe(true);
+  });
+
+  it("グループ会社のドメインは同じ系列として認める", () => {
+    expect(
+      checkDomainOwnership({
+        companyName: "株式会社長津製作所",
+        url: "https://www.nagatsu-g.co.jp/company/about/",
+        rootTitle: "長津グループ",
+        rootText: "長津グループのウェブサイトです。",
+      }).owned,
+    ).toBe(true);
+
+    expect(
+      checkDomainOwnership({
+        companyName: "アオイ自動車工業株式会社",
+        url: "https://aoi-group.com/about/",
+        rootTitle: "アオイグループ",
+        rootText: "アオイグループは自動車整備を手がけています。",
+      }).owned,
+    ).toBe(true);
+  });
+
+  it("多数の企業を並べた名簿は落とす", () => {
+    const listing = [
+      "株式会社アルファ工業",
+      "株式会社ベータ製作所",
+      "有限会社ガンマ精機",
+      "株式会社デルタ鉄工",
+      "株式会社イプシロン機械",
+      "有限会社ゼータ金属",
+    ].join(" / ");
+    const result = checkDomainOwnership({
+      companyName: "株式会社大神鉄工所",
+      url: "https://example-portal.jp/member/daisin.html",
+      rootTitle: "会員企業一覧",
+      rootText: listing,
+    });
+    expect(result.owned).toBe(false);
+  });
+
+  it("社名の核を取り出せる", () => {
+    expect(companyCoreName("株式会社長津製作所")).toBe("長津");
+    expect(companyCoreName("アオイ自動車工業株式会社")).toBe("アオイ");
+    expect(companyCoreName("大東プレス工業株式会社")).toBe("大東プレス");
+    expect(companyCoreName("大阪機器製造株式会社")).toBe("大阪機器");
+    // 地名だけになる社名は識別に使えないので使わない
+    expect(companyCoreName("株式会社大阪")).toBeNull();
+  });
+});
+
+describe("looksLikeRecordPageUrl（名簿の1件分のページ）", () => {
+  it.each([
+    "https://www.monodukuri-kyoto.jp/company/4630/",
+    "https://www.letswork-hyogo.jp/company/b0140/",
+    "https://www.kenkocho.co.jp/asp/data/kd_cotoda/503876",
+    "https://www.m-osaka.com/jp/takumi/7044/",
+    "https://amaportal.jp/detail01.php?n=4644",
+    "https://irbank.net/mynumber/pref/27?c=27211&z=5670047",
+    "https://www.24u.jp/0664994784/",
+  ])("識別子つきのページを見分ける: %s", (url) => {
+    expect(looksLikeRecordPageUrl(url)).toBe(true);
+  });
+
+  it.each([
+    "http://www.daito-press.co.jp/company",
+    "https://www.nagatsu-g.co.jp/company/about/",
+    "https://aoi-group.com/about/",
+    "https://www.chiyoda-seiki.co.jp/company/foothold.html",
+    // ファイル名に数字が入る自社サイトを落とさない
+    "http://ohskchuck.web.fc2.com/ohashi-011.html",
+    "https://kojima-ironworks.co.jp/pages/2/",
+  ])("自社サイトの固定ページは識別子と見なさない: %s", (url) => {
+    expect(looksLikeRecordPageUrl(url)).toBe(false);
   });
 });

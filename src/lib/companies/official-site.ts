@@ -165,6 +165,83 @@ export function isDomainRootUrl(url: string | null): boolean {
   }
 }
 
+/**
+ * 社名から業種を表す末尾を落とした「核」の部分。
+ * 長津製作所 → 長津 / アオイ自動車工業 → アオイ / 大東プレス工業 → 大東プレス
+ *
+ * グループ会社は親のドメイン（nagatsu-g.co.jp / aoi-group.com）を使うことがあり、
+ * トップページの名義が「長津グループ」「アオイグループ」になる。
+ * 社名の完全一致だけを見ると自社サイトを他社扱いしてしまうため、核の部分で照合する。
+ */
+const INDUSTRY_SUFFIX_PATTERN =
+  /(製作所|製造所|工業所|工作所|鉄工所|鋳造所|製鋼所|加工所|グループ|ホールディングス|ホールディング|自動車|工業|産業|製造|製作|精機|精密|機械|機工|鉄工|鋳造|電機|電気|化学|樹脂|金属|商会|商事|運輸|建設|設備|工務店|製菓|食品)$/;
+
+/** 地名だけになった核は識別に使えない（同じ地域のポータルに一致してしまう） */
+const GENERIC_CORE_NAMES = new Set([
+  "大阪", "京都", "神戸", "兵庫", "東京", "名古屋", "滋賀", "奈良", "和歌山", "岐阜", "愛知", "九州", "関西", "関東", "日本", "日本橋", "中央", "共和", "共栄",
+]);
+
+export function companyCoreName(name: string): string | null {
+  let core = stripCorporateSuffix(name);
+  // 「アオイ自動車工業」のように業種語が重なる場合があるため数回落とす
+  for (let i = 0; i < 3; i += 1) {
+    const next = core.replace(INDUSTRY_SUFFIX_PATTERN, "");
+    if (next === core) break;
+    core = next;
+  }
+  if (core.length < 2) return null;
+  if (GENERIC_CORE_NAMES.has(core)) return null;
+  return core;
+}
+
+/**
+ * トップページが「企業名簿・ポータル」に見えるか。
+ *
+ * 「社名が見つからないから他社のサイト」と判断すると、社名を画像で出している
+ * 自社サイトやグループサイトを落としてしまう（実データで3社を誤って外した）。
+ * 却下するのは、そのページが多数の企業を並べている＝名簿だと確認できたときだけにする。
+ */
+const DIRECTORY_VOCABULARY =
+  /(企業一覧|会員一覧|会員企業|会員紹介|加盟店|掲載企業|事業所一覧|企業検索|企業情報検索|会社検索|求人情報|求人検索|ポータル|データベース|登録企業|取引先検索|口コミ)/;
+
+export function looksLikeCompanyDirectoryPage(rootTitle: string | null | undefined, rootText: string | null | undefined): boolean {
+  const haystack = `${rootTitle ?? ""}\n${rootText ?? ""}`;
+  if (!haystack.trim()) return false;
+  const names = haystack.match(/(株式会社|有限会社|合同会社|合資会社)[^\s、。・|｜/（）()【】\[\]]{2,14}/g) ?? [];
+  const distinct = new Set(names.map((n) => n.trim())).size;
+  if (distinct >= 6) return true;
+  return DIRECTORY_VOCABULARY.test(haystack) && distinct >= 3;
+}
+
+/**
+ * 名簿・ポータルの「1件分のページ」の URL 形か。
+ *
+ * 企業の自社サイトは /company /about /company/outline.html のような固定の区画を使う。
+ * 名簿・ポータルは1社ごとに識別子を振る: /company/4630/ /company/b0140/
+ * /detail01.php?n=4644 /jp/takumi/7044/ /asp/data/kd_cotoda/503876 /0664994784/
+ *
+ * 識別子は「独立したセグメント」または「クエリの値」に限って見る。
+ * ohashi-011.html のようにファイル名に数字が入る自社サイトを落とさないため。
+ */
+export function looksLikeRecordPageUrl(url: string | null): boolean {
+  if (!url) return false;
+  const normalized = normalizeUrl(url);
+  if (!normalized) return false;
+  try {
+    const u = new URL(normalized);
+    const segments = u.pathname.split("/").filter(Boolean);
+    // 独立したセグメントが識別子（3桁以上の数字、または英字1-2文字＋3桁以上の数字）
+    if (segments.some((seg) => /^\d{3,}$/.test(seg) || /^[a-z]{1,2}\d{3,}$/i.test(seg))) return true;
+    // クエリの値が識別子
+    for (const [, value] of u.searchParams) {
+      if (/^\d{3,}$/.test(value)) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 /** ドメイン名に会社名の英字トークンが含まれるか */
 export function domainMatchesCompanyName(companyName: string, domain: string | null): boolean {
   if (!domain) return false;
@@ -229,10 +306,28 @@ export function checkDomainOwnership(input: DomainOwnershipInput): DomainOwnersh
     return { owned: true, reason: "トップページに会社名の記載あり" };
   }
 
-  return {
-    owned: false,
-    reason: `トップページ（${domain}）が別の運営者のため、会員紹介・ポータル内のページと判断`,
-  };
+  // グループ会社は親のドメインを使うため、社名の核で照合する
+  const core = companyCoreName(input.companyName);
+  if (core && (title.includes(core) || rootNorm.includes(normalizeCompanyName(core) ?? core))) {
+    return { owned: true, reason: `トップページが同じ系列（${core}）` };
+  }
+
+  // 社名が見つからないだけでは落とさない（社名を画像で出している自社サイトがある）。
+  // 名簿・ポータルだと言える根拠が別にあるときだけ落とす。根拠は次の2つのいずれか。
+  if (looksLikeRecordPageUrl(input.url)) {
+    return {
+      owned: false,
+      reason: `1社ごとに識別子を振る名簿・ポータルのページ（${domain}）で、トップページにも社名がない`,
+    };
+  }
+  if (looksLikeCompanyDirectoryPage(input.rootTitle, input.rootText)) {
+    return {
+      owned: false,
+      reason: `トップページ（${domain}）が多数の企業を掲載する名簿・ポータルのため、その中の1ページと判断`,
+    };
+  }
+
+  return { owned: true, reason: "名簿・ポータルとは判断できないため保留" };
 }
 
 export interface OfficialSiteCandidate {
