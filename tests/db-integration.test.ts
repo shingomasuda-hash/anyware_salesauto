@@ -22,6 +22,7 @@ import { buildCompanyWhere, companyFilterSchema } from "@/lib/companies/filters"
 import { listCompanyOverview } from "@/db/repositories/companies";
 import { replaceCompanySources, listCompanySources, refreshDiscoveryRunCounts, insertDiscoveryRun, insertCandidates } from "@/db/repositories/discovery";
 import { getMonthlySpend } from "@/lib/ai/pricing";
+import { checkRequiredSchema } from "@/db/required-columns";
 
 const url = process.env.TEST_DATABASE_URL;
 const run = url ? describe : describe.skip;
@@ -42,20 +43,25 @@ run("実DBに対する統合テスト", () => {
   });
 
   describe("マイグレーション", () => {
-    it("コードが参照する列がすべて存在する", async () => {
-      const required: Record<string, string[]> = {
-        companies: ["recruit_target", "recruit_target_reasons", "job_boards"],
-        company_analysis: ["outreach_subject", "outreach_body", "outreach_personalization", "outreach_hypothesis_note"],
-        company_overview: ["recruit_target", "job_boards", "outreach_subject", "outreach_body", "has_outreach", "confidence_score", "sales_priority_rank", "analysis_id"],
-      };
-      for (const [table, columns] of Object.entries(required)) {
-        const { rows } = await pool.query<{ column_name: string }>(
-          `select column_name from information_schema.columns where table_schema='public' and table_name=$1`,
-          [table],
-        );
-        const have = new Set(rows.map((r) => r.column_name));
-        for (const c of columns) expect(have, `${table}.${c}`).toContain(c);
-      }
+    it("コードが参照する列と関数がすべて存在する", async () => {
+      // db:verify と /api/health が使うのと同じ判定を通す
+      const result = await checkRequiredSchema(db);
+      expect(result.missingColumns).toEqual({});
+      expect(result.missingFunctions).toEqual([]);
+      expect(result.ok).toBe(true);
+    });
+
+    it("列が欠けていれば検知できる（検知できないチェックは無意味なので確認する）", async () => {
+      const broken = await checkRequiredSchema(db, { companies: ["company_name", "存在しない列"] }, ["claim_job", "存在しない関数"]);
+      expect(broken.ok).toBe(false);
+      expect(broken.missingColumns.companies).toEqual(["存在しない列"]);
+      expect(broken.missingFunctions).toEqual(["存在しない関数"]);
+    });
+
+    it("テーブルそのものが無い場合も検知できる", async () => {
+      const broken = await checkRequiredSchema(db, { 存在しないテーブル: ["a", "b"] }, []);
+      expect(broken.ok).toBe(false);
+      expect(broken.missingColumns["存在しないテーブル"]).toEqual(["a", "b"]);
     });
 
     it("ビューに列を途中挿入すると失敗する（この制約でバグが起きた）", async () => {

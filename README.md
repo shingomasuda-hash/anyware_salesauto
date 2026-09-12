@@ -290,6 +290,26 @@ Neon Console の **Tables** で `companies` などが見えれば成功です。
 - API で絞れない条件（業種 / 市区町村）は取得後にローカルで判定（`src/lib/integrations/gbiz/mapping.ts`）
 - 検索結果に `company_url` が無い法人のみ詳細 API を呼び、API 呼び出し数を抑制
 
+## 7.5 本番デプロイの確認
+
+デプロイ後に `GET /api/health` を開くと、**設定が足りているかと DB が移行済みかを値を出さずに**確認できます。
+`ok: false`（HTTP 503）なら本番はまだ動きません。
+
+```bash
+curl -s https://<本番URL>/api/health | jq
+```
+
+| 見る場所 | 正常な状態 |
+| --- | --- |
+| `dataMode` | `live`（`mock` のままだと実データを取りません） |
+| `env` | `DATABASE_URL` / `GBIZ_API_KEY` / `ANTHROPIC_API_KEY` / `BRAVE_SEARCH_API_KEY` / `CRON_SECRET` / `JOB_SECRET` が `true` |
+| `db.migrated` | `true`。`false` のとき `db.missingColumns` に不足している列が出ます |
+| `discovery.providersAvailable` | 2種以上（`gbiz` のみだと Multi-Source になりません） |
+| `outreach.configured` | `true`（`false` だと文面を生成しません） |
+| `ai.monthlyBudgetJpy` | 想定の上限 |
+
+秘密情報は返しません（設定の有無のみ。取材テーマ等の本文も返しません）。
+
 ## 8. Google API 設定
 
 任意です。**地域の企業の発見**（Google Places Provider）と、公式サイト URL が GビズINFO に無い企業の **公式サイト候補探索** に使用します。
