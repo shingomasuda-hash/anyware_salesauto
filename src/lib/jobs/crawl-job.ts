@@ -5,7 +5,7 @@ import { replaceCompanyPages } from "@/db/repositories/pages";
 import { ensureSuppression } from "@/db/repositories/suppression";
 import { getCrawlerConfig } from "@/lib/config/crawler";
 import { extractDomain, normalizeUrl } from "@/lib/companies/normalize";
-import { decideOfficialSite, isNonOfficialDomain, type OfficialSiteCandidate, type OfficialSiteScore } from "@/lib/companies/official-site";
+import { checkDomainOwnership, decideOfficialSite, domainRootUrl, isNonOfficialDomain, type OfficialSiteCandidate, type OfficialSiteScore } from "@/lib/companies/official-site";
 import { crawlSite } from "@/lib/crawler/crawl-site";
 import { extractHtml } from "@/lib/crawler/extract";
 import { selectCompanyEmail } from "@/lib/crawler/contacts";
@@ -208,6 +208,22 @@ async function resolveOfficialSite(db: Db, company: CompanyRow, logger: Logger):
     return { status: decision.status, url: null, domain: null, confidence: decision.best?.confidence ?? null, best: decision.best, candidates: storedScored };
   }
 
+  // そのドメインが本当にその企業のものか、トップページで確認する。
+  // 商工会議所の会員紹介・地域ポータルの企業ページは社名も住所も電話も載っているため、
+  // ページ単体の照合では公式サイトと区別できない。区別できるのはドメインの持ち主。
+  const ownership = await verifyDomainOwnership(company.company_name, decision.best.url, logger);
+  if (!ownership.owned) {
+    await logger.info("公式サイトではないと判断（ドメインの持ち主が別）", { url: decision.best.url, reason: ownership.reason });
+    return {
+      status: "needs_review",
+      url: null,
+      domain: decision.best.domain,
+      confidence: decision.best.confidence,
+      best: decision.best,
+      candidates: storedScored.map((c) => (c.url === decision.best?.url ? { ...c, reasons: [...(c.reasons ?? []), ownership.reason] } : c)),
+    };
+  }
+
   // ドメインが他社に登録済みなら要確認（重複防止）
   const domain = decision.best.domain;
   if (domain) {
@@ -220,6 +236,28 @@ async function resolveOfficialSite(db: Db, company: CompanyRow, logger: Logger):
 
   await logger.info("公式サイトを特定", { url: decision.best.url, confidence: decision.best.confidence, reasons: decision.best.reasons });
   return { status: "verified", url: decision.best.url, domain, confidence: decision.best.confidence, best: decision.best, candidates: storedScored };
+}
+
+/**
+ * ドメインのトップページを取得して持ち主を確認する。
+ * 取得できないときは判断を保留する（取得失敗で実在する公式サイトを捨てないため）。
+ */
+async function verifyDomainOwnership(companyName: string, url: string, logger: Logger) {
+  const root = domainRootUrl(url);
+  if (!root) return { owned: true, reason: "トップページURLを組み立てられず保留" };
+  let rootTitle: string | null = null;
+  let rootText: string | null = null;
+  try {
+    const res = await fetchHtml(root);
+    if (res.ok && res.body) {
+      const extracted = extractHtml(res.body, res.finalUrl, 6000);
+      rootTitle = extracted.title;
+      rootText = extracted.text;
+    }
+  } catch (err) {
+    await logger.warn("トップページを取得できなかったため持ち主の確認を保留", { url: root, ...serializeError(err) });
+  }
+  return checkDomainOwnership({ companyName, url, rootTitle, rootText });
 }
 
 function buildCompanyUpdate(company: CompanyRow, site: ResolvedSite, summary: CrawlSummary, now: string, recruitTarget: RecruitTargetResult): Partial<CompanyInsert> {

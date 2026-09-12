@@ -1,8 +1,9 @@
 /**
  * 登録済みの公式サイトURLを、現在の判定基準で再点検する。
  *
- *   npm run db:recheck-sites            … 対象を表示するだけ
- *   npm run db:recheck-sites -- --apply … 不適切なURLを外して要確認に戻す
+ *   npm run db:recheck-sites              … 対象を表示するだけ
+ *   npm run db:recheck-sites -- --apply   … 不適切なURLを外して要確認に戻す
+ *   npm run db:recheck-sites -- --no-fetch … トップページを見ずURLの形だけで判定（速い）
  *
  * 公式サイトの判定は実データ検証で何度も厳しくしてきたが、
  * 既に登録済みの URL には遡って適用されていなかった。
@@ -19,11 +20,39 @@ import { sql } from "drizzle-orm";
 import { getDb, rawRows } from "../src/db";
 import { updateCompany } from "../src/db/repositories/companies";
 import { recheckSiteUrl } from "../src/lib/companies/site-recheck";
+import { checkDomainOwnership, domainRootUrl } from "../src/lib/companies/official-site";
+import { extractHtml } from "../src/lib/crawler/extract";
+import { fetchHtml } from "../src/lib/integrations/http/fetch";
 import type { Json } from "../src/db/types";
 
 type Row = { id: string; company_name: string; website_url: string; website_candidates: unknown };
 
 const apply = process.argv.includes("--apply");
+/** トップページを取得して持ち主を確認する処理を省く */
+const noFetch = process.argv.includes("--no-fetch");
+
+/**
+ * ドメインのトップページを見て、本当にその企業のサイトかを確認する。
+ * 商工会議所の会員紹介ページ・地域ポータルの企業ページは、社名も住所も電話も
+ * 載っているためページ単体では区別できない。トップページの持ち主を見れば分かる。
+ */
+async function checkOwnership(companyName: string, url: string) {
+  const root = domainRootUrl(url);
+  if (!root) return { owned: true, reason: "トップページURLを組み立てられず保留" };
+  let rootTitle: string | null = null;
+  let rootText: string | null = null;
+  try {
+    const res = await fetchHtml(root);
+    if (res.ok && res.body) {
+      const extracted = extractHtml(res.body, res.finalUrl, 6000);
+      rootTitle = extracted.title;
+      rootText = extracted.text;
+    }
+  } catch {
+    // 取得できなければ判断を保留する（取得失敗で実在する公式サイトを捨てないため）
+  }
+  return checkDomainOwnership({ companyName, url, rootTitle, rootText });
+}
 
 async function main() {
   const db = getDb();
@@ -35,23 +64,38 @@ async function main() {
         order by updated_at desc`,
   );
 
+  console.log(`公式サイトが登録されている企業: ${rows.length}社`);
+
+  // 1段目: URL の形で落とせるもの（取得不要）
   const bad = rows
     .map((r) => ({ row: r, verdict: recheckSiteUrl(r.website_url) }))
     .filter((x) => !x.verdict.ok);
 
-  console.log(`公式サイトが登録されている企業: ${rows.length}社`);
+  // 2段目: URL の形は問題ないが、ドメインの持ち主が別のもの
+  if (!noFetch) {
+    const remaining = rows.filter((r) => recheckSiteUrl(r.website_url).ok);
+    console.log(`うち ${remaining.length}社のトップページを確認します（API費用はかかりません）…`);
+    let checked = 0;
+    for (const r of remaining) {
+      const ownership = await checkOwnership(r.company_name, r.website_url);
+      checked++;
+      if (checked % 20 === 0) console.log(`  ${checked}/${remaining.length}社`);
+      if (!ownership.owned) bad.push({ row: r, verdict: { ok: false, reason: ownership.reason } });
+    }
+  }
+
   if (bad.length === 0) {
     console.log("現在の基準で不適切なURLはありません。");
     return;
   }
 
   console.log(`\n公式サイトとして不適切: ${bad.length}社\n`);
-  for (const { row, verdict } of bad.slice(0, 30)) {
+  for (const { row, verdict } of bad.slice(0, 40)) {
     console.log(`  ${row.company_name}`);
     console.log(`    ${row.website_url}`);
     console.log(`    → ${verdict.reason}`);
   }
-  if (bad.length > 30) console.log(`  … 他 ${bad.length - 30}社`);
+  if (bad.length > 40) console.log(`  … 他 ${bad.length - 40}社`);
 
   if (!apply) {
     console.log(`\n外すには --apply を付けてください（例: npm run db:recheck-sites -- --apply）`);
@@ -69,9 +113,27 @@ async function main() {
       verification_status: "needs_review",
       crawl_status: "no_website",
       official_site_confidence: null,
+      // その企業のサイトではないページから拾った情報なので、連絡先として残してはいけない。
+      // 商工会議所の会員紹介ページのメールアドレス・電話番号を企業の連絡先にしてしまう。
+      email: null,
+      phone: null,
+      contact_page_url: null,
+      contact_form_url: null,
+      recruit_page_url: null,
+      recruit_target: null,
+      recruit_target_reasons: null,
+      job_boards: null,
+      instagram_url: null,
+      facebook_url: null,
+      x_url: null,
+      youtube_url: null,
+      linkedin_url: null,
+      tiktok_url: null,
+      // 営業拒否の記載は消さない（安全側に倒す）
     });
   }
   console.log(`\n${bad.length}社の公式サイトを外し、「要確認」に戻しました。`);
+  console.log("そのページから拾っていた連絡先・採用ページ・SNSも消しました（別サイトの情報だったため）。");
   console.log("これらの企業は一覧から除外されます（フィルタ「公式HP未確認も表示」で確認できます）。");
 }
 

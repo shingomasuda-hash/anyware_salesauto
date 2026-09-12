@@ -84,12 +84,17 @@ async function main() {
   }
 
   let queued = 0;
+  let already = 0;
   for (const r of targets) {
     const result = await enqueueCrawlJob(db, r.id, { enqueueAnalysis: withAnalysis });
     if (result.created) queued++;
+    else already++;
   }
+  // 「0社投入」だけを出すと何も起きていないように見えるが、実際には前回投入分が待機している。
+  // 待機中の件数まで出さないと、キューを処理すべきかどうかが判断できない。
   console.log(`\n${queued}社のクロールジョブを投入しました。`);
-  console.log(`次に実行: npm run jobs:run -- --drain`);
+  if (already > 0) console.log(`${already}社は既に投入済みのため重複投入しませんでした（キューで待機中です）。`);
+  if (queued + already > 0) console.log(`次に実行: npm run jobs:run -- --drain`);
 }
 
 main()

@@ -1,4 +1,4 @@
-import { addressAppearsIn, extractDomain, normalizeCompanyName, normalizePhone, stripCorporateSuffix, toHalfWidth } from "./normalize";
+import { addressAppearsIn, extractDomain, normalizeCompanyName, normalizePhone, normalizeUrl, stripCorporateSuffix, toHalfWidth } from "./normalize";
 
 /** 公式サイトとして扱わないドメイン（求人媒体・SNS・企業DB・地図等） */
 export const NON_OFFICIAL_DOMAINS: string[] = [
@@ -72,15 +72,160 @@ export function looksLikeDirectoryPageUrl(url: string | null): boolean {
   }
 }
 
+/**
+ * 法人情報データベースらしいホスト名。
+ *
+ * パス全体で判定すると、会社概要ページを /kaisha/ や /hojin/ に置いている実在の
+ * 中小企業サイトまで落としてしまう。ホスト名に限定して誤判定を避ける。
+ */
+const CORPORATE_DB_HOST_PATTERN = /(houjin|hojin|corporate[-_]?number|corpnumber|kaisha|company[-_]?search|toukibo)/i;
+
 export function looksLikeCorporateDatabaseUrl(url: string | null): boolean {
   if (!url) return false;
   // URL に13桁（法人番号）が現れるページは、企業の公式サイトではなく法人情報DBの詳細ページ。
   // 末尾が .html のもの（/detail/1120001003996.html）も拾えるよう区切りを限定しない。
-  return /\d{13}/.test(url) || /(houjin|hojin|corporate[-_]?number|corpnumber|kaisha|company[-_]?search)/i.test(url);
+  if (/\d{13}/.test(url)) return true;
+  const domain = extractDomain(url);
+  return domain !== null && CORPORATE_DB_HOST_PATTERN.test(domain);
 }
 
 /** 自治体・官公庁のドメイン（公式サイト候補にしない） */
 const GOVERNMENT_DOMAIN_PATTERNS = [/\.lg\.jp$/, /\.go\.jp$/, /(^|\.)city\.[^.]+\.jp$/, /(^|\.)pref\.[^.]+\.jp$/];
+
+/**
+ * 団体専用の属性型JPドメイン。株式会社・有限会社はこれらを登録できない（JPRS の登録要件）。
+ * 商工会議所・工業会・協同組合の「会員紹介ページ」が公式サイトとして登録されていたため、
+ * ドメインを1件ずつ列挙するのをやめてこの規則で落とす。
+ */
+const ORGANIZATION_DOMAIN_PATTERNS = [/\.or\.jp$/, /\.gr\.jp$/, /\.ac\.jp$/, /\.ed\.jp$/];
+
+/** 団体・学校専用ドメインか */
+export function isOrganizationDomain(domain: string | null): boolean {
+  if (!domain) return false;
+  return ORGANIZATION_DOMAIN_PATTERNS.some((re) => re.test(domain));
+}
+
+/**
+ * 公式サイトとして認めない URL を1か所で判定する。
+ *
+ * 以前は同じ判断を crawl-job（1条件のみ）・official-web（4条件）・site-recheck（4条件）に
+ * 書き写しており、条件を追加しても crawl-job だけ古いままだった。
+ * そのため db:recheck-sites で外した URL を、次のクロールが公式サイトとして再登録していた。
+ * scoreOfficialSiteCandidate から必ず呼ぶことで、この関数を通らない経路を作らない。
+ *
+ * @returns 認めない理由。認める場合は null
+ */
+export function rejectOfficialSiteUrl(url: string | null): string | null {
+  if (!url) return "URL が設定されていません";
+  const domain = extractDomain(url);
+  if (!domain) return "URL が不正です";
+  if (isNonOfficialDomain(domain)) return `公式サイトにならないドメイン（${domain}）`;
+  if (isOrganizationDomain(domain)) return `団体・学校専用ドメイン（${domain}）`;
+  if (looksLikeCorporateDatabaseUrl(url)) return "法人情報データベースのページ";
+  if (looksLikeDirectoryPageUrl(url)) return "企業ディレクトリ・名簿のページ";
+  if (isNonHtmlUrl(url)) return "HTML ページではありません";
+  return null;
+}
+
+/**
+ * そのドメインのトップページ URL。
+ * ホスト名はそのまま使う（ohskchuck.web.fc2.com のような借りたサブドメインも
+ * 企業自身のトップページとして扱えるようにするため）。
+ */
+export function domainRootUrl(url: string | null): string | null {
+  if (!url) return null;
+  const normalized = normalizeUrl(url);
+  if (!normalized) return null;
+  try {
+    const u = new URL(normalized);
+    return `${u.protocol}//${u.host}/`;
+  } catch {
+    return null;
+  }
+}
+
+/** 候補 URL がトップページそのものか（配下のページではないか） */
+export function isDomainRootUrl(url: string | null): boolean {
+  if (!url) return false;
+  const normalized = normalizeUrl(url);
+  if (!normalized) return false;
+  try {
+    const u = new URL(normalized);
+    return (u.pathname === "/" || u.pathname === "") && !u.search;
+  } catch {
+    return false;
+  }
+}
+
+/** ドメイン名に会社名の英字トークンが含まれるか */
+export function domainMatchesCompanyName(companyName: string, domain: string | null): boolean {
+  if (!domain) return false;
+  const domainBase = domain.split(".")[0];
+  if (domainBase.length < 3) return false;
+  return companyNameTokens(companyName).some((t) => domainBase.includes(t) || t.includes(domainBase));
+}
+
+export interface DomainOwnershipInput {
+  companyName: string;
+  /** 判定したい候補 URL */
+  url: string;
+  /** トップページのタイトル（取得できなかったときは null） */
+  rootTitle?: string | null;
+  /** トップページ本文（取得できなかったときは null） */
+  rootText?: string | null;
+}
+
+export interface DomainOwnershipResult {
+  owned: boolean;
+  reason: string;
+}
+
+/**
+ * そのドメインが本当にその企業のものかを確認する。
+ *
+ * 商工会議所の会員紹介・地域ポータル・求人媒体の企業ページは、ページ内に社名も所在地も
+ * 電話番号も載っているため、ページ単体の照合では公式サイトと区別できない。
+ * 区別できるのは「ドメインの持ち主が誰か」で、それはトップページを見れば分かる。
+ * 企業自身のサイトならトップページに社名が出る（多くはフッターにも）。
+ * 会員紹介ページならトップページは団体・ポータルの名前になる。
+ *
+ * ドメインを1件ずつ列挙する方式ではいたちごっこになるため、この規則で判断する。
+ */
+export function checkDomainOwnership(input: DomainOwnershipInput): DomainOwnershipResult {
+  const domain = extractDomain(input.url);
+
+  // ドメイン名が社名に由来するなら、その企業のドメインとみなせる
+  if (domainMatchesCompanyName(input.companyName, domain)) {
+    return { owned: true, reason: "ドメイン名が会社名に由来" };
+  }
+
+  // 候補がトップページそのものなら、ページ自体の照合で足りる（別途加点している）
+  if (isDomainRootUrl(input.url)) {
+    return { owned: true, reason: "候補がトップページ" };
+  }
+
+  // トップページを取得できなかった場合は判断を保留し、落とさない（取得失敗で誤って捨てないため）
+  if (!input.rootTitle && !input.rootText) {
+    return { owned: true, reason: "トップページを確認できず保留" };
+  }
+
+  const nameStripped = stripCorporateSuffix(input.companyName);
+  const title = toHalfWidth(input.rootTitle ?? "");
+  if (nameStripped && title.includes(nameStripped)) {
+    return { owned: true, reason: "トップページのタイトルが会社名" };
+  }
+
+  const nameNorm = normalizeCompanyName(input.companyName);
+  const rootNorm = normalizeCompanyName(toHalfWidth(input.rootText ?? "").slice(0, 20_000));
+  if (nameNorm && rootNorm.includes(nameNorm)) {
+    return { owned: true, reason: "トップページに会社名の記載あり" };
+  }
+
+  return {
+    owned: false,
+    reason: `トップページ（${domain}）が別の運営者のため、会員紹介・ポータル内のページと判断`,
+  };
+}
 
 export interface OfficialSiteCandidate {
   url: string;
@@ -135,8 +280,11 @@ export function scoreOfficialSiteCandidate(target: OfficialSiteTarget, candidate
 
   if (!domain) return { url: candidate.url, domain: null, confidence: 0, reasons: ["URLが不正"] };
 
-  if (isNonOfficialDomain(domain)) {
-    return { url: candidate.url, domain, confidence: 5, reasons: ["求人媒体/SNS/企業DBなど公式サイト以外のドメイン"] };
+  // 出所（GビズINFO登録URL等）によらず、まず共有ゲートで落とす。
+  // GビズINFO に誤った URL が登録されている企業があり、出所の基礎点だけで閾値を超えていた。
+  const rejected = rejectOfficialSiteUrl(candidate.url);
+  if (rejected) {
+    return { url: candidate.url, domain, confidence: 5, reasons: [rejected] };
   }
 
   // 出所による基礎点

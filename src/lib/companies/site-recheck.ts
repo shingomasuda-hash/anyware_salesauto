@@ -1,5 +1,4 @@
-import { extractDomain } from "./normalize";
-import { isNonHtmlUrl, isNonOfficialDomain, looksLikeCorporateDatabaseUrl, looksLikeDirectoryPageUrl } from "./official-site";
+import { rejectOfficialSiteUrl } from "./official-site";
 
 export interface SiteRecheckResult {
   ok: boolean;
@@ -14,14 +13,12 @@ export interface SiteRecheckResult {
  * 既に登録された企業の URL には遡って適用されていなかった。
  * その結果、法人情報DB・電話番号検索・団体の会員一覧ページなどが
  * 「公式サイト」として残り、再クロールでもそこを読み続けてしまう。
+ *
+ * 判定条件は rejectOfficialSiteUrl に集約している。
+ * 以前はここに条件を書き写していたため、クロール側の条件と食い違い、
+ * ここで外した URL をクロールが再登録し直すという行き違いが起きていた。
  */
 export function recheckSiteUrl(url: string | null | undefined): SiteRecheckResult {
-  if (!url) return { ok: false, reason: "URL が設定されていません" };
-  const domain = extractDomain(url);
-  if (!domain) return { ok: false, reason: "URL を解釈できません" };
-  if (isNonOfficialDomain(domain)) return { ok: false, reason: `公式サイトにならないドメイン（${domain}）` };
-  if (looksLikeCorporateDatabaseUrl(url)) return { ok: false, reason: "法人情報データベースのページ" };
-  if (looksLikeDirectoryPageUrl(url)) return { ok: false, reason: "企業ディレクトリ・名簿のページ" };
-  if (isNonHtmlUrl(url)) return { ok: false, reason: "HTML ページではありません" };
-  return { ok: true, reason: null };
+  const reason = rejectOfficialSiteUrl(url ?? null);
+  return reason ? { ok: false, reason } : { ok: true, reason: null };
 }
