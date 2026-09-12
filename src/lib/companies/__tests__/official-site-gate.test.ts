@@ -251,3 +251,70 @@ describe("looksLikeRecordPageUrl（名簿の1件分のページ）", () => {
     expect(looksLikeRecordPageUrl(url)).toBe(false);
   });
 });
+
+describe("Web検索で見つけた公式サイトが合格できる（55点天井の修正）", () => {
+  const target = {
+    companyName: "株式会社山本精機製作所",
+    address: "大阪府大阪市東成区中本1-2-3",
+    phone: null,
+    corporateNumber: "1120001234567",
+  };
+  const page = {
+    title: "株式会社山本精機製作所｜会社概要",
+    pageText: "会社概要 株式会社山本精機製作所 大阪府大阪市東成区中本1-2-3 事業内容",
+  };
+
+  it("持ち主を確認できれば閾値を越える", () => {
+    // 修正前は 15(出所)+20(社名)+15(所在地)+5(会社概要)=55点が天井で、
+    // どれだけ正しい公式サイトでも 60点に届かなかった。
+    // 残る加点（電話15・法人番号20・ドメイン名類似12）は実データでほぼ取れない。
+    const r = scoreOfficialSiteCandidate(target, {
+      url: "https://yamamoto-seiki.co.jp/company/",
+      source: "search",
+      ...page,
+      domainOwnershipConfirmed: true,
+    });
+    expect(r.confidence).toBeGreaterThanOrEqual(OFFICIAL_SITE_THRESHOLD);
+    expect(r.reasons).toContain("ドメインの持ち主が同社と確認");
+  });
+
+  it("持ち主を確認できていない（保留）なら加点しない", () => {
+    // 保留に加点すると、名簿と否定できなかっただけのポータルが通ってしまう
+    const r = scoreOfficialSiteCandidate(target, {
+      url: "https://yamamoto-seiki.co.jp/company/",
+      source: "search",
+      ...page,
+      domainOwnershipConfirmed: false,
+    });
+    expect(r.confidence).toBeLessThan(OFFICIAL_SITE_THRESHOLD);
+  });
+
+  it("所在地が一致しなければ、持ち主を確認できても通さない", () => {
+    const r = scoreOfficialSiteCandidate(target, {
+      url: "https://other-company.co.jp/company/",
+      source: "search",
+      title: "株式会社山本精機製作所｜会社概要",
+      pageText: "会社概要 株式会社山本精機製作所 事業内容",
+      domainOwnershipConfirmed: true,
+    });
+    expect(r.confidence).toBeLessThan(OFFICIAL_SITE_THRESHOLD);
+  });
+
+  it("持ち主の確認は「確認できた」と「保留」を区別する", () => {
+    const confirmed = checkDomainOwnership({
+      companyName: "株式会社葉田鋳造鉄工所",
+      url: "https://hatataki.co.jp/company/",
+      rootTitle: "株式会社葉田鋳造鉄工所",
+      rootText: "ごあいさつ",
+    });
+    expect(confirmed).toMatchObject({ owned: true, confirmed: true });
+
+    const held = checkDomainOwnership({
+      companyName: "株式会社葉田鋳造鉄工所",
+      url: "https://example.co.jp/company/",
+      rootTitle: "ものづくりのプロ",
+      rootText: "高精度加工でお応えします",
+    });
+    expect(held).toMatchObject({ owned: true, confirmed: false });
+  });
+});

@@ -1,6 +1,6 @@
 import { getCrawlerConfig } from "@/lib/config/crawler";
 import { extractDomain, normalizeUrl } from "@/lib/companies/normalize";
-import { decideOfficialSite, isNonHtmlUrl, isNonOfficialDomain, looksLikeCorporateDatabaseUrl, looksLikeDirectoryPageUrl, type OfficialSiteCandidate } from "@/lib/companies/official-site";
+import { checkDomainOwnership, decideOfficialSite, domainRootUrl, isDomainRootUrl, isNonHtmlUrl, isNonOfficialDomain, looksLikeCorporateDatabaseUrl, looksLikeDirectoryPageUrl, type OfficialSiteCandidate } from "@/lib/companies/official-site";
 import { extractHtml } from "@/lib/crawler/extract";
 import { fetchHtml } from "@/lib/integrations/http/fetch";
 import { toCandidate } from "../normalizer";
@@ -100,6 +100,33 @@ export class OfficialWebProvider implements CompanyDiscoveryProvider {
     }
   }
 
+  /**
+   * ドメインのトップページを見て持ち主を確認する。
+   * 候補がトップページそのものなら取得済みの本文を使い回し、余分なリクエストをしない。
+   */
+  private async checkOwnership(
+    companyName: string,
+    url: string,
+    extracted: { title: string | null; text: string | null },
+    context: DiscoveryContext,
+  ) {
+    if (isDomainRootUrl(url)) {
+      return checkDomainOwnership({ companyName, url, rootTitle: extracted.title, rootText: extracted.text });
+    }
+    const root = domainRootUrl(url);
+    if (!root || !context.budget.canVerificationRequest()) {
+      return checkDomainOwnership({ companyName, url, rootTitle: null, rootText: null });
+    }
+    context.budget.consumeVerificationRequest();
+    const cfg = getCrawlerConfig();
+    const res = await fetchHtml(root, { timeoutMs: cfg.timeoutMs });
+    if (!res.ok || !res.body) {
+      return checkDomainOwnership({ companyName, url, rootTitle: null, rootText: null });
+    }
+    const rootPage = extractHtml(res.body, res.finalUrl, 8000);
+    return checkDomainOwnership({ companyName, url, rootTitle: rootPage.title, rootText: rootPage.text });
+  }
+
   async checkOfficialSite(candidate: MergedCandidate, context: DiscoveryContext): Promise<OfficialSiteCheck> {
     const known = Array.from(
       new Set(
@@ -132,12 +159,22 @@ export class OfficialWebProvider implements CompanyDiscoveryProvider {
       const extracted = extractHtml(res.body, res.finalUrl, 8000);
       // 検索で見つけた URL は観測に含まれないため、その場合は "search" 扱いにする
       const source = candidate.observations.find((o) => normalizeUrl(o.website) === url)?.source;
+
+      // ドメインの持ち主を確認する。
+      // 確認できれば加点し、名簿・ポータルの1ページと分かれば候補から外す。
+      const ownership = await this.checkOwnership(candidate.name, url, extracted, context);
+      if (!ownership.owned) {
+        await context.log("info", "名簿・ポータルのページのため候補から除外", { url, reason: ownership.reason });
+        continue;
+      }
+
       fetched.push({
         url: normalizeUrl(res.finalUrl) ?? url,
         title: extracted.title,
         pageText: extracted.text,
         text: extracted.text,
         source: source === "gbiz" ? "gbiz" : source === "google_places" ? "google_places" : "search",
+        domainOwnershipConfirmed: ownership.confirmed,
       });
     }
 

@@ -18,7 +18,7 @@ config();
 
 import { sql } from "drizzle-orm";
 import { getDb, rawRows } from "../src/db";
-import { addressAppearsIn, normalizePhone } from "../src/lib/companies/normalize";
+import { addressAppearsIn, addressMatchKeys, normalizePhone } from "../src/lib/companies/normalize";
 import { rejectOfficialSiteUrl } from "../src/lib/companies/official-site";
 import { extractHtml } from "../src/lib/crawler/extract";
 import { fetchHtml } from "../src/lib/integrations/http/fetch";
@@ -45,6 +45,19 @@ function arg(name: string): string | undefined {
   return i >= 0 ? process.argv[i + 1] : undefined;
 }
 const refetch = Number(arg("refetch") ?? 0);
+
+/** ページ内の住所らしい文字列を拾う（別会社かどうかの判断材料） */
+function findAddressLike(text: string, prefecture: string | null): string[] {
+  const results = new Set<string>();
+  const pattern = /(北海道|青森県|岩手県|宮城県|秋田県|山形県|福島県|茨城県|栃木県|群馬県|埼玉県|千葉県|東京都|神奈川県|新潟県|富山県|石川県|福井県|山梨県|長野県|岐阜県|静岡県|愛知県|三重県|滋賀県|京都府|大阪府|兵庫県|奈良県|和歌山県|鳥取県|島根県|岡山県|広島県|山口県|徳島県|香川県|愛媛県|高知県|福岡県|佐賀県|長崎県|熊本県|大分県|宮崎県|鹿児島県|沖縄県)[^\s、。|｜]{4,30}/g;
+  for (const m of text.match(pattern) ?? []) results.add(m.trim());
+  if (results.size === 0 && prefecture) {
+    // 都道府県を省いた表記（「東成区中本1-2-3」）も拾う
+    const cityPattern = /[一-龥ぁ-んァ-ヶ]{2,8}(市|区|郡|町|村)[^\s、。|｜]{3,24}/g;
+    for (const m of text.match(cityPattern) ?? []) results.add(m.trim());
+  }
+  return [...results];
+}
 
 function tally<T extends string>(items: T[]): [T, number][] {
   const map = new Map<T, number>();
@@ -187,35 +200,48 @@ async function main() {
         continue;
       }
 
-      // 会社概要らしいリンクを1つ辿る
+      // 会社概要・アクセス・お問い合わせのページを辿る。
+      // URL だけで探すと /03.html のようなサイトを拾えないため、リンク文字も見る。
       const links = extractHtml(top.body, top.finalUrl, 20_000).links;
-      const aboutUrl = links.find((l) => /company|about|corporate|outline|profile|gaiyou|kaisha/i.test(l.url))?.url;
-      if (!aboutUrl) {
-        notFound++;
-        console.log(`  △ ${r.name}: 会社概要ページへのリンクが無い`);
-        continue;
+      const aboutUrls = links
+        .filter(
+          (l) =>
+            /company|about|corporate|outline|profile|gaiyou|kaisha|access|contact|info/i.test(l.url) ||
+            /会社概要|企業情報|会社案内|会社情報|概要|アクセス|所在地|お問い?合わせ|連絡先/.test(l.text),
+        )
+        .map((l) => l.url)
+        .filter((u) => u !== top.finalUrl)
+        .slice(0, 3);
+
+      let collected = topText;
+      for (const aboutUrl of aboutUrls) {
+        const about = await fetchHtml(aboutUrl);
+        if (!about.ok || !about.body) continue;
+        collected += "\n" + extractHtml(about.body, about.finalUrl, 20_000).text;
       }
-      const about = await fetchHtml(aboutUrl);
-      if (!about.ok || !about.body) {
-        notFound++;
-        console.log(`  △ ${r.name}: 会社概要ページを読めない（${aboutUrl}）`);
-        continue;
-      }
-      const aboutText = extractHtml(about.body, about.finalUrl, 20_000).text;
-      const aboutHasAddress = r.address ? addressAppearsIn(r.address, aboutText) : false;
-      const aboutHasPhone = phoneDigits ? aboutText.replace(/[^\d]/g, "").includes(phoneDigits) : false;
+
+      const aboutHasAddress = r.address ? addressAppearsIn(r.address, collected) : false;
+      const aboutHasPhone = phoneDigits ? collected.replace(/[^\d]/g, "").includes(phoneDigits) : false;
       if (aboutHasAddress || aboutHasPhone) {
         recoveredByAbout++;
-        console.log(`  ◎ ${r.name}: 会社概要ページで一致（住所 ${aboutHasAddress ? "○" : "×"} / 電話 ${aboutHasPhone ? "○" : "×"}）`);
-      } else {
-        notFound++;
-        console.log(`  △ ${r.name}: 会社概要ページにも一致なし（別会社のサイトの可能性）`);
+        console.log(`  ◎ ${r.name}: 下位ページで一致（住所 ${aboutHasAddress ? "○" : "×"} / 電話 ${aboutHasPhone ? "○" : "×"}・${aboutUrls.length}ページ読んだ）`);
+        continue;
       }
+
+      notFound++;
+      // 「別会社」なのか「住所の表記ゆれで照合が失敗している」のかを区別する材料を出す。
+      // ここを取り違えると、検索クエリを直すべきところで照合を直してしまう。
+      const found = findAddressLike(collected, r.prefecture);
+      console.log(`  △ ${r.name}: 一致なし`);
+      console.log(`      期待する住所: ${r.address ?? "（なし）"}`);
+      console.log(`      照合キー:     ${addressMatchKeys(r.address).join(" / ") || "（生成できず）"}`);
+      console.log(`      ページ内の住所らしい記載: ${found.length > 0 ? found.slice(0, 3).join(" / ") : "見つからない"}`);
+      console.log(`      読んだURL: ${url}`);
     }
 
     console.log(`\n--- 検証結果 ---`);
     console.log(`  トップページで一致した:           ${topOnly}社`);
-    console.log(`  会社概要ページまで読めば一致した: ${recoveredByAbout}社  ← ここが多ければ実装を直せば取り戻せる`);
+    console.log(`  下位ページまで読めば一致した:     ${recoveredByAbout}社  ← ここが多ければ実装を直せば取り戻せる`);
     console.log(`  どちらにも一致しなかった:         ${notFound}社  ← 別会社のサイトを見ている可能性`);
     console.log(`  読めなかった:                     ${unreachable}社`);
     if (sample.length > 0) {

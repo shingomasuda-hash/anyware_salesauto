@@ -261,7 +261,14 @@ export interface DomainOwnershipInput {
 }
 
 export interface DomainOwnershipResult {
+  /** 名簿・ポータルの1ページだと断定できない（候補として残してよい） */
   owned: boolean;
+  /**
+   * そのドメインがその企業のものだと**積極的に確認できた**。
+   * owned が true でも「名簿とは言えないので保留」の場合は false。
+   * 加点はこちらだけを見る（保留に加点すると、否定できなかったポータルが通ってしまう）。
+   */
+  confirmed: boolean;
   reason: string;
 }
 
@@ -281,35 +288,35 @@ export function checkDomainOwnership(input: DomainOwnershipInput): DomainOwnersh
 
   // ドメイン名が社名に由来するなら、その企業のドメインとみなせる
   if (domainMatchesCompanyName(input.companyName, domain)) {
-    return { owned: true, reason: "ドメイン名が会社名に由来" };
+    return { owned: true, confirmed: true, reason: "ドメイン名が会社名に由来" };
   }
 
   // 候補がトップページそのものなら、ページ自体の照合で足りる（別途加点している）
   if (isDomainRootUrl(input.url)) {
-    return { owned: true, reason: "候補がトップページ" };
+    return { owned: true, confirmed: false, reason: "候補がトップページ（別途ページ本文で照合する）" };
   }
 
   // トップページを取得できなかった場合は判断を保留し、落とさない（取得失敗で誤って捨てないため）
   if (!input.rootTitle && !input.rootText) {
-    return { owned: true, reason: "トップページを確認できず保留" };
+    return { owned: true, confirmed: false, reason: "トップページを確認できず保留" };
   }
 
   const nameStripped = stripCorporateSuffix(input.companyName);
   const title = toHalfWidth(input.rootTitle ?? "");
   if (nameStripped && title.includes(nameStripped)) {
-    return { owned: true, reason: "トップページのタイトルが会社名" };
+    return { owned: true, confirmed: true, reason: "トップページのタイトルが会社名" };
   }
 
   const nameNorm = normalizeCompanyName(input.companyName);
   const rootNorm = normalizeCompanyName(toHalfWidth(input.rootText ?? "").slice(0, 20_000));
   if (nameNorm && rootNorm.includes(nameNorm)) {
-    return { owned: true, reason: "トップページに会社名の記載あり" };
+    return { owned: true, confirmed: true, reason: "トップページに会社名の記載あり" };
   }
 
   // グループ会社は親のドメインを使うため、社名の核で照合する
   const core = companyCoreName(input.companyName);
   if (core && (title.includes(core) || rootNorm.includes(normalizeCompanyName(core) ?? core))) {
-    return { owned: true, reason: `トップページが同じ系列（${core}）` };
+    return { owned: true, confirmed: true, reason: `トップページが同じ系列（${core}）` };
   }
 
   // 社名が見つからないだけでは落とさない（社名を画像で出している自社サイトがある）。
@@ -317,17 +324,19 @@ export function checkDomainOwnership(input: DomainOwnershipInput): DomainOwnersh
   if (looksLikeRecordPageUrl(input.url)) {
     return {
       owned: false,
+      confirmed: false,
       reason: `1社ごとに識別子を振る名簿・ポータルのページ（${domain}）で、トップページにも社名がない`,
     };
   }
   if (looksLikeCompanyDirectoryPage(input.rootTitle, input.rootText)) {
     return {
       owned: false,
+      confirmed: false,
       reason: `トップページ（${domain}）が多数の企業を掲載する名簿・ポータルのため、その中の1ページと判断`,
     };
   }
 
-  return { owned: true, reason: "名簿・ポータルとは判断できないため保留" };
+  return { owned: true, confirmed: false, reason: "名簿・ポータルとは判断できないため保留" };
 }
 
 export interface OfficialSiteCandidate {
@@ -338,6 +347,11 @@ export interface OfficialSiteCandidate {
   pageText?: string | null;
   /** 候補の出所 */
   source: "gbiz" | "google_places" | "manual" | "search";
+  /**
+   * そのドメインがその企業のものだと確認できたか（checkDomainOwnership の confirmed）。
+   * トップページの名義で裏が取れた場合の加点に使う。
+   */
+  domainOwnershipConfirmed?: boolean;
 }
 
 export interface OfficialSiteTarget {
@@ -464,6 +478,20 @@ export function scoreOfficialSiteCandidate(target: OfficialSiteTarget, candidate
   if (/会社概要|企業情報|会社案内|company|about/i.test(haystack)) {
     score += 5;
     reasons.push("会社概要の記載あり");
+  }
+
+  // そのドメインの持ち主がその企業だと確認できた。
+  //
+  // この加点が無いと、Web検索で見つけた正しい公式サイトは
+  // 15（出所）+20（社名）+15（所在地）+5（会社概要）= 55点が天井で、
+  // 閾値60点をどうしても越えられなかった。
+  // 残りの加点（電話15点・法人番号20点・ドメイン名類似12点）は実データでは
+  // ほぼ取れない（電話の保有率0%、法人番号はページに載らない、
+  // ドメイン名類似は英字のみ判定のため日本語社名で常に0）。
+  // 閾値を下げるのではなく、実際に確認できる事実に加点する。
+  if (candidate.domainOwnershipConfirmed) {
+    score += 10;
+    reasons.push("ドメインの持ち主が同社と確認");
   }
 
   return { url: candidate.url, domain, confidence: Math.max(0, Math.min(100, Math.round(score))), reasons };

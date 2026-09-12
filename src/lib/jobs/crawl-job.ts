@@ -5,7 +5,7 @@ import { replaceCompanyPages } from "@/db/repositories/pages";
 import { ensureSuppression } from "@/db/repositories/suppression";
 import { getCrawlerConfig } from "@/lib/config/crawler";
 import { extractDomain, normalizeUrl } from "@/lib/companies/normalize";
-import { checkDomainOwnership, decideOfficialSite, domainRootUrl, isNonOfficialDomain, type OfficialSiteCandidate, type OfficialSiteScore } from "@/lib/companies/official-site";
+import { checkDomainOwnership, decideOfficialSite, domainRootUrl, isDomainRootUrl, isNonOfficialDomain, type OfficialSiteCandidate, type OfficialSiteScore } from "@/lib/companies/official-site";
 import { crawlSite } from "@/lib/crawler/crawl-site";
 import { extractHtml } from "@/lib/crawler/extract";
 import { selectCompanyEmail } from "@/lib/crawler/contacts";
@@ -173,6 +173,7 @@ async function resolveOfficialSite(db: Db, company: CompanyRow, logger: Logger):
   if (stored.length === 0) return { status: "no_website", url: null, domain: null, confidence: null, best: null, candidates: [] };
 
   const candidates: OfficialSiteCandidate[] = [];
+  const rejectedByOwnership: { url: string; reason: string }[] = [];
   for (const c of stored.slice(0, 3)) {
     const url = normalizeUrl(c.url);
     if (!url) continue;
@@ -183,7 +184,34 @@ async function resolveOfficialSite(db: Db, company: CompanyRow, logger: Logger):
       continue;
     }
     const extracted = extractHtml(res.body, res.finalUrl, 6000);
-    candidates.push({ url: normalizeUrl(res.finalUrl) ?? url, title: extracted.title, pageText: extracted.text, source: c.source });
+
+    // ドメインの持ち主を確認する。採点より前に行い、
+    // 名簿・ポータルの1ページなら候補から外し、確認できたら加点材料として渡す。
+    const ownership = await verifyDomainOwnership(company.company_name, url, extracted, logger);
+    if (!ownership.owned) {
+      await logger.info("名簿・ポータルのページのため候補から除外", { url, reason: ownership.reason });
+      rejectedByOwnership.push({ url, reason: ownership.reason });
+      continue;
+    }
+
+    candidates.push({
+      url: normalizeUrl(res.finalUrl) ?? url,
+      title: extracted.title,
+      pageText: extracted.text,
+      source: c.source,
+      domainOwnershipConfirmed: ownership.confirmed,
+    });
+  }
+
+  if (candidates.length === 0 && rejectedByOwnership.length > 0) {
+    return {
+      status: "needs_review",
+      url: null,
+      domain: null,
+      confidence: null,
+      best: null,
+      candidates: rejectedByOwnership.map((r) => ({ url: r.url, source: "search", reasons: [r.reason] })),
+    };
   }
 
   const decision = decideOfficialSite(
@@ -208,22 +236,6 @@ async function resolveOfficialSite(db: Db, company: CompanyRow, logger: Logger):
     return { status: decision.status, url: null, domain: null, confidence: decision.best?.confidence ?? null, best: decision.best, candidates: storedScored };
   }
 
-  // そのドメインが本当にその企業のものか、トップページで確認する。
-  // 商工会議所の会員紹介・地域ポータルの企業ページは社名も住所も電話も載っているため、
-  // ページ単体の照合では公式サイトと区別できない。区別できるのはドメインの持ち主。
-  const ownership = await verifyDomainOwnership(company.company_name, decision.best.url, logger);
-  if (!ownership.owned) {
-    await logger.info("公式サイトではないと判断（ドメインの持ち主が別）", { url: decision.best.url, reason: ownership.reason });
-    return {
-      status: "needs_review",
-      url: null,
-      domain: decision.best.domain,
-      confidence: decision.best.confidence,
-      best: decision.best,
-      candidates: storedScored.map((c) => (c.url === decision.best?.url ? { ...c, reasons: [...(c.reasons ?? []), ownership.reason] } : c)),
-    };
-  }
-
   // ドメインが他社に登録済みなら要確認（重複防止）
   const domain = decision.best.domain;
   if (domain) {
@@ -240,19 +252,28 @@ async function resolveOfficialSite(db: Db, company: CompanyRow, logger: Logger):
 
 /**
  * ドメインのトップページを取得して持ち主を確認する。
+ * 候補がトップページそのものなら取得済みの本文を使い回し、余分なリクエストをしない。
  * 取得できないときは判断を保留する（取得失敗で実在する公式サイトを捨てないため）。
  */
-async function verifyDomainOwnership(companyName: string, url: string, logger: Logger) {
+async function verifyDomainOwnership(
+  companyName: string,
+  url: string,
+  extracted: { title: string | null; text: string | null },
+  logger: Logger,
+) {
+  if (isDomainRootUrl(url)) {
+    return checkDomainOwnership({ companyName, url, rootTitle: extracted.title, rootText: extracted.text });
+  }
   const root = domainRootUrl(url);
-  if (!root) return { owned: true, reason: "トップページURLを組み立てられず保留" };
+  if (!root) return { owned: true, confirmed: false, reason: "トップページURLを組み立てられず保留" };
   let rootTitle: string | null = null;
   let rootText: string | null = null;
   try {
     const res = await fetchHtml(root);
     if (res.ok && res.body) {
-      const extracted = extractHtml(res.body, res.finalUrl, 6000);
-      rootTitle = extracted.title;
-      rootText = extracted.text;
+      const rootPage = extractHtml(res.body, res.finalUrl, 6000);
+      rootTitle = rootPage.title;
+      rootText = rootPage.text;
     }
   } catch (err) {
     await logger.warn("トップページを取得できなかったため持ち主の確認を保留", { url: root, ...serializeError(err) });
