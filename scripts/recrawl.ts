@@ -19,8 +19,9 @@ config();
 import { sql } from "drizzle-orm";
 import { getDb, rawRows } from "../src/db";
 import { enqueueCrawlJob } from "../src/lib/jobs/enqueue";
+import { recheckSiteUrl } from "../src/lib/companies/site-recheck";
 
-type Row = { id: string; company_name: string; prefecture: string | null; recruit_target: string | null };
+type Row = { id: string; company_name: string; prefecture: string | null; recruit_target: string | null; website_url: string | null };
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -37,7 +38,7 @@ async function main() {
   const db = getDb();
   const rows = await rawRows<Row>(
     db,
-    sql`select id, company_name, prefecture, recruit_target
+    sql`select id, company_name, prefecture, recruit_target, website_url
         from companies
         where website_url is not null
           and verification_status in ('verified','manual')
@@ -52,12 +53,27 @@ async function main() {
     return;
   }
 
-  const unjudged = rows.filter((r) => !r.recruit_target).length;
-  console.log(`対象: ${rows.length}社（うち採用状況が未判定 ${unjudged}社）`);
-  for (const r of rows.slice(0, 10)) {
+  // 現在の基準で公式サイトとして不適切な URL は読みに行かない。
+  // 法人情報DB・団体名簿を20ページずつ読むのは無駄で、相手方にも負荷をかける。
+  const invalid = rows.filter((r) => !recheckSiteUrl(r.website_url).ok);
+  const targets = rows.filter((r) => recheckSiteUrl(r.website_url).ok);
+  if (invalid.length > 0) {
+    console.log(`公式サイトが不適切なため除外: ${invalid.length}社`);
+    for (const r of invalid.slice(0, 5)) console.log(`  ${r.company_name} → ${r.website_url}`);
+    if (invalid.length > 5) console.log(`  … 他 ${invalid.length - 5}社`);
+    console.log("  → npm run db:recheck-sites -- --apply で公式サイトを外してください\n");
+  }
+  if (targets.length === 0) {
+    console.log("クロールできる企業がありません。");
+    return;
+  }
+
+  const unjudged = targets.filter((r) => !r.recruit_target).length;
+  console.log(`対象: ${targets.length}社（うち採用状況が未判定 ${unjudged}社）`);
+  for (const r of targets.slice(0, 10)) {
     console.log(`  ${r.company_name}（${r.prefecture ?? "—"} / 採用状況 ${r.recruit_target ?? "未判定"}）`);
   }
-  if (rows.length > 10) console.log(`  … 他 ${rows.length - 10}社`);
+  if (targets.length > 10) console.log(`  … 他 ${targets.length - 10}社`);
 
   console.log(`\nクロール自体に API 費用はかかりません。`);
   console.log(withAnalysis ? "AI分析も投入します（1社14円程度の費用がかかります）。" : "AI分析は投入しません（--with-analysis で投入できます）。");
@@ -68,7 +84,7 @@ async function main() {
   }
 
   let queued = 0;
-  for (const r of rows) {
+  for (const r of targets) {
     const result = await enqueueCrawlJob(db, r.id, { enqueueAnalysis: withAnalysis });
     if (result.created) queued++;
   }

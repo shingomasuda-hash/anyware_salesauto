@@ -23,6 +23,7 @@ import { listCompanyOverview } from "@/db/repositories/companies";
 import { replaceCompanySources, listCompanySources, refreshDiscoveryRunCounts, insertDiscoveryRun, insertCandidates } from "@/db/repositories/discovery";
 import { getMonthlySpend } from "@/lib/ai/pricing";
 import { checkRequiredSchema } from "@/db/required-columns";
+import { recheckSiteUrl } from "@/lib/companies/site-recheck";
 
 const url = process.env.TEST_DATABASE_URL;
 const run = url ? describe : describe.skip;
@@ -187,6 +188,38 @@ run("実DBに対する統合テスト", () => {
       const list = await names(`website_url is not null and verification_status in ('verified','manual')`);
       expect(list).toContain("抽出_未クロール");
       expect(list).not.toContain("抽出_HP未確認");
+    });
+  });
+
+  describe("登録済み公式サイトの再点検", () => {
+    // 判定を厳しくしても既存の URL には遡って適用されておらず、
+    // 法人情報DB・団体名簿を「公式サイト」として再クロールし続けていた（実データで発生）
+    it("実データで登録されていた誤りURLを不適と判定する", () => {
+      for (const url of [
+        "https://houjin.goo.to/corporations/1120001008038",
+        "https://navikyo.com/075-502-5693/",
+        "https://tsukulink.net/osaka/city_271225/540773",
+        "https://sia-japan.com/company_list/654/",
+        "https://www.act-kyoto.jp/organization_list/matsuoka",
+      ]) {
+        expect(recheckSiteUrl(url).ok, url).toBe(false);
+      }
+    });
+
+    it("実企業の公式サイトは残す", () => {
+      for (const url of ["https://matsushitaseiki.co.jp", "https://sakai-kougyou.co.jp/company/", "https://aoi-group.com/about/"]) {
+        expect(recheckSiteUrl(url).ok, url).toBe(true);
+      }
+    });
+
+    it("不適切なURLの企業は一覧に出ない", async () => {
+      await pool.query(`
+        insert into companies (company_name, company_name_normalized, source, website_url, website_domain, verification_status, crawl_status, sales_contact_allowed, recruit_target)
+        values ('点検_誤りURL','点検誤り','gbiz','https://houjin.goo.to/corporations/1120001008038','houjin.goo.to','needs_review','no_website','true','no_recruit_page')
+        on conflict do nothing`);
+      const f = companyFilterSchema.parse({});
+      const result = await listCompanyOverview(db, { where: buildCompanyWhere(f), orderBy: [sql`created_at desc`], limit: 200, offset: 0 });
+      expect(result.rows.map((r) => r.company_name)).not.toContain("点検_誤りURL");
     });
   });
 

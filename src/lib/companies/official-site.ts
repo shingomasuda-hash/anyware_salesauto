@@ -27,6 +27,8 @@ export const NON_OFFICIAL_DOMAINS: string[] = [
   "kaisharesearch.com", "g-search.or.jp", "cnavi.g-search.or.jp", "always-basics.com",
   "companyinformation.jp", "compalyze.co.jp", "helloboss.com", "baseconnect.in",
   "salesnow.jp", "musubu.in", "ullet.com", "alarmbox.jp", "tdb.co.jp", "tsr-net.co.jp",
+  // 電話番号検索・マッチング・団体名簿（実データで公式サイトとして登録されていた）
+  "navikyo.com", "tsukulink.net", "sia-japan.com", "kptc.jp", "act-kyoto.jp", "kyoto-hitoiro.com",
   "its-mo.com", "navitime.com", "loco.yahoo.co.jp", "tel-search.jp",
 ];
 
@@ -40,6 +42,36 @@ export function isNonHtmlUrl(url: string | null): boolean {
 }
 
 /** 法人番号（13桁）をパスに含む URL は法人情報データベースとみなす */
+/**
+ * 企業ディレクトリ・名簿ページの URL 形。
+ *
+ * 「どのサイトか」をドメインで列挙し続けるのは追いつかないため、URL の形で判定する。
+ * 実データで公式サイトとして登録されていた誤りの例:
+ *   /company_list/654/  /organization_list/matsuoka  /corporations/1120001008038
+ *   /075-502-5693/（電話番号がパスになっている検索サイト）
+ *
+ * 実在する公式サイトを落とさないよう、`/company/` や `/about/` 単体は対象にしない。
+ */
+const DIRECTORY_PATH_PATTERNS: RegExp[] = [
+  /\/(company|companies|corporate|member|organization|shop|store|office|factory)[-_]?list(\/|$)/i,
+  /\/(kaiin|kaiinlist|meibo|ichiran)(\/|$)/i,
+  /\/corporations?\//i,
+  /\/corp\/[\w-]+/i,
+  /\/(company|corporate)\/detail(\/|$)/i,
+  /\/detail\/\d+/i,
+  /\/0\d{1,4}-\d{2,4}-\d{4}(\/|$)/,
+];
+
+export function looksLikeDirectoryPageUrl(url: string | null): boolean {
+  if (!url) return false;
+  try {
+    const path = new URL(url).pathname;
+    return DIRECTORY_PATH_PATTERNS.some((re) => re.test(path));
+  } catch {
+    return false;
+  }
+}
+
 export function looksLikeCorporateDatabaseUrl(url: string | null): boolean {
   if (!url) return false;
   // URL に13桁（法人番号）が現れるページは、企業の公式サイトではなく法人情報DBの詳細ページ。

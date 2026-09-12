@@ -1,6 +1,6 @@
 import { getCrawlerConfig } from "@/lib/config/crawler";
 import { extractDomain, normalizeUrl } from "@/lib/companies/normalize";
-import { decideOfficialSite, isNonHtmlUrl, isNonOfficialDomain, looksLikeCorporateDatabaseUrl, type OfficialSiteCandidate } from "@/lib/companies/official-site";
+import { decideOfficialSite, isNonHtmlUrl, isNonOfficialDomain, looksLikeCorporateDatabaseUrl, looksLikeDirectoryPageUrl, type OfficialSiteCandidate } from "@/lib/companies/official-site";
 import { extractHtml } from "@/lib/crawler/extract";
 import { fetchHtml } from "@/lib/integrations/http/fetch";
 import { toCandidate } from "../normalizer";
@@ -86,7 +86,9 @@ export class OfficialWebProvider implements CompanyDiscoveryProvider {
             // PDF・表計算などは公式サイトの本文として読めない
             .filter((u) => !isNonHtmlUrl(u))
             // 法人番号をパスに含む URL は法人情報データベース
-            .filter((u) => !looksLikeCorporateDatabaseUrl(u)),
+            .filter((u) => !looksLikeCorporateDatabaseUrl(u))
+            // 企業ディレクトリ・名簿ページ（/company_list/ 等）も公式サイトにしない
+            .filter((u) => !looksLikeDirectoryPageUrl(u)),
         ),
       );
     } catch (err) {

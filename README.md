@@ -657,6 +657,22 @@ Prompt Caching が効いたまま文面を追加できます。
 企業詳細ページの「取材依頼文（下書き）」で、件名・本文・**その企業に合わせて触れた事実**を確認できます。
 CSV にも「文面件名」「文面本文」列が入ります。一覧の「文面あり」で絞り込めます。
 
+#### 公式サイトの判定を厳しくしたあとに既存データへ反映する
+
+公式サイトの判定基準は実データ検証で何度も厳しくしてきましたが、
+**既に登録済みの `website_url` には遡って適用されません**。
+古い基準で登録された法人情報DB・電話番号検索・団体名簿のページが「公式サイト」として残り、
+再クロールでもそこを読み続けることになります。
+
+```bash
+npm run db:recheck-sites            # 対象と理由を表示するだけ
+npm run db:recheck-sites -- --apply # 公式サイトを外して「要確認」に戻す
+```
+
+外した URL は `website_candidates` に理由つきで残すので、後から確認できます。
+外された企業は一覧から除外されます（フィルタ「公式HP未確認も表示」で見られます）。
+`npm run recrawl` も、現在の基準で不適切な URL の企業はクロールしません。
+
 #### 判定ロジックを変えたあとに既存の企業へ反映する
 
 採用状況（`recruit_target`）や問い合わせ情報は **クロール時に判定** するため、
@@ -724,6 +740,7 @@ npm run ai:cost -- --project 50   # 実績平均から50社分の費用を予測
 npm run env:check          # Live 実行に必要な環境変数の充足チェック（値は表示しません）
 npm run discovery:verify   # 直近の探索ランを検証（企業ごとの結果・精度指標・Provider別貢献・安全検査）
 npm run db:verify          # DBのスキーマがコードの期待と一致しているか確認（db:migrate の直後に実行）
+npm run db:recheck-sites   # 登録済みの公式サイトURLを現在の基準で再点検（--apply で外す）
 npm run db:dedupe-sources  # company_sources の重複行を掃除（--apply で削除 / --inspect で中身を確認）
 npm run db:repair-candidates # 企業登録済みなのに failed のままの候補を verified に戻す（--apply）
 npm run jobs:run -- --drain  # キューに残ったクロール・AI分析を処理しきってから終了
