@@ -358,11 +358,30 @@ Brave 以外へ差し替える場合はこの interface を実装するだけで
 | `npm run db:generate` | `src/db/schema.ts` の変更から SQL マイグレーションを生成 |
 | `npm run db:generate -- --custom --name xxx` | 関数・ビュー等を手書きする空のマイグレーションを作成 |
 | `npm run db:verify` | DB のスキーマがコードの期待と一致しているか確認（`db:migrate` の直後に実行する） |
+| `npm run test:db` | 実 PostgreSQL に対して生SQL・ビュー・マイグレーションを通す統合テスト |
 | `npm run db:check` | マイグレーションの整合性チェック |
 | `npm run db:studio` | Drizzle Studio（ブラウザで DB を閲覧） |
 
 **スキーマ変更の流れ**: `src/db/schema.ts` を編集 → `npm run db:generate` → 生成された SQL を確認 → `npm run db:migrate`。
 ビューや PostgreSQL 関数を変更する場合は `--custom` で空ファイルを作り SQL を記述します（`drizzle/0001_functions.sql` 参照）。
+
+**生SQL・ビュー・マイグレーションを変更したら `npm run test:db` を実行してください。**
+`npm test` は純粋関数のテストだけで、SQL を一度も実行しません。
+過去のバグ（ビューの列を途中に挿入してマイグレーションが黙って失敗する、
+行コンストラクタ `IN` でパラメータ型が決まらず昇格が失敗する、
+採用ページ前提の絞り込みが残っていた）はすべて `lint` / `typecheck` / `npm test` / `build` を
+通過していました。SQL は実行しないと壊れていることが分かりません。
+
+使い捨ての PostgreSQL を立てて実行します（`TEST_DATABASE_URL` が未設定なら skip されます）。
+
+```bash
+# 例: ローカルに使い捨ての DB を作って実行する
+createdb anyware_test
+TEST_DATABASE_URL=postgres://localhost:5432/anyware_test npm run test:db
+```
+
+このテストはマイグレーションの適用、一覧フィルタの全組み合わせ、`company_sources` の
+書き込み、探索ランの集計、AI費用の集計を **実 DB で** 実行します。
 
 **ビューに列を追加するときの注意**: `CREATE OR REPLACE VIEW` は
 **既存の列の途中に列を挿入できません**（PostgreSQL の制約。列名・順序・型が一致し、末尾への追加のみ許されます）。

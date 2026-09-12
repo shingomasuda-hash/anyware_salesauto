@@ -49,13 +49,18 @@ async function main() {
     console.log(`取材テーマ: ${outreach.interviewTopic}`);
   }
 
-  // 採用ページがある企業だけが分析対象（ANALYSIS_REQUIRE_RECRUIT_PAGE）
+  // 採用の痕跡がある企業が分析対象（ANALYSIS_REQUIRE_RECRUIT_SIGNAL）。
+  // 採用ページの有無では絞らない。公式サイトに採用ページが無い企業も主要ターゲットのため。
   const rows = await rawRows<Row>(
     db,
     sql`select id, company_name, prefecture, sales_priority_rank, has_outreach
         from company_overview
-        where has_recruit_page = true
+        where (recruit_target is null or recruit_target <> 'no_signal')
           and sales_contact_allowed <> 'false'
+          -- 分析はクロール済みページを材料にするため、未クロールの企業を投入しても必ず失敗する
+          and website_url is not null
+          and verification_status in ('verified','manual')
+          and crawl_status = 'crawled'
           ${prefecture ? sql`and prefecture = ${prefecture}` : sql``}
           ${rank ? sql`and sales_priority_rank = ${rank}` : sql``}
         order by sales_priority_score desc nulls last, created_at desc
@@ -63,7 +68,7 @@ async function main() {
   );
 
   if (rows.length === 0) {
-    console.log("\n対象の企業がありません（採用ページあり・営業可の企業が対象です）。");
+    console.log("\n対象の企業がありません（クロール済み・採用の痕跡あり・営業可の企業が対象です）。");
     return;
   }
 
