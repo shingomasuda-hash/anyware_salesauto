@@ -67,12 +67,37 @@ export function addressMatchKeys(address: string | null | undefined): string[] {
   return [...new Set(keys.filter((k) => k.length >= 6))];
 }
 
+/**
+ * 照合キーが1文字だけ違う箇所がテキストにあるか。
+ *
+ * 登記の住所と企業サイトの表記で1文字だけ異なることがある。
+ * 実データの例: 「三木市吉川町鍛治屋」（登記） vs 「三木市吉川町鍛冶屋」（自社サイト）。
+ * 完全一致だけだと同じ会社を別会社として落としてしまう。
+ * 1文字までに限れば、別の住所を取り違える危険は小さい（キーは10文字以上）。
+ */
+function appearsWithOneCharDiff(key: string, haystack: string): boolean {
+  if (key.length < 8) return false;
+  for (let i = 0; i + key.length <= haystack.length; i += 1) {
+    let diff = 0;
+    for (let j = 0; j < key.length; j += 1) {
+      if (haystack[i + j] !== key[j]) {
+        diff += 1;
+        if (diff > 1) break;
+      }
+    }
+    if (diff <= 1) return true;
+  }
+  return false;
+}
+
 /** 正規化済みテキストに所在地が現れるか */
 export function addressAppearsIn(address: string | null | undefined, text: string | null | undefined): boolean {
   const keys = addressMatchKeys(address);
   if (keys.length === 0 || !text) return false;
   const haystack = normalizeAddress(text) ?? "";
-  return keys.some((k) => haystack.includes(k));
+  if (keys.some((k) => haystack.includes(k))) return true;
+  // 異体字・誤記で1文字だけ違う場合を拾う
+  return keys.some((k) => appearsWithOneCharDiff(k, haystack));
 }
 
 const KANJI_DIGITS: Record<string, number> = { 〇: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };

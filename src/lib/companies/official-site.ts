@@ -231,7 +231,8 @@ export function looksLikeRecordPageUrl(url: string | null): boolean {
     const u = new URL(normalized);
     const segments = u.pathname.split("/").filter(Boolean);
     // 独立したセグメントが識別子（3桁以上の数字、または英字1-2文字＋3桁以上の数字）
-    if (segments.some((seg) => /^\d{3,}$/.test(seg) || /^[a-z]{1,2}\d{3,}$/i.test(seg))) return true;
+    // 1578-1599038562 のように数字をハイフンでつないだ識別子もある
+    if (segments.some((seg) => /^\d{3,}(-\d+)*$/.test(seg) || /^[a-z]{1,2}\d{3,}$/i.test(seg))) return true;
     // クエリの値が識別子
     for (const [, value] of u.searchParams) {
       if (/^\d{3,}$/.test(value)) return true;

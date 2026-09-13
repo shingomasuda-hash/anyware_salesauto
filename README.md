@@ -834,6 +834,7 @@ npm run env:check          # Live 実行に必要な環境変数の充足チェ�
 npm run discovery:verify   # 直近の探索ランを検証（企業ごとの結果・精度指標・Provider別貢献・安全検査）
 npm run maintain           # 保守処理をまとめて確認（--apply で実行）。順番を間違えないようこれを使う
 npm run db:diagnose-sites  # 公式サイトを特定できなかった原因の内訳（--refetch N で仮説を実測）
+npm run db:reverify        # 候補URLを持つ既存候補を現在の基準でやり直す（Web検索は走らない＝費用ゼロ）
 npm run db:verify          # DBのスキーマがコードの期待と一致しているか確認（db:migrate の直後に実行）
 npm run db:recheck-sites   # 登録済みの公式サイトURLを現在の基準で再点検（--apply で外す）
 npm run db:dedupe-sources  # company_sources の重複行を掃除（--apply で削除 / --inspect で中身を確認）

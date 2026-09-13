@@ -14,6 +14,7 @@
  */
 import { spawn } from "node:child_process";
 import path from "node:path";
+import { warnIfBehindRemote } from "./lib/git-freshness";
 import { MAINTENANCE_STEPS } from "../src/lib/maintenance/steps";
 
 const apply = process.argv.includes("--apply");
@@ -30,6 +31,7 @@ function run(script: string, args: string[]): Promise<number> {
 }
 
 async function main() {
+  await warnIfBehindRemote();
   console.log(apply ? "保守処理を実行します（--apply）。" : "保守処理の確認だけを行います（DBは変更しません）。");
   if (!apply) console.log("実際に直すには --apply を付けてください: npm run maintain -- --apply");
 

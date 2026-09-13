@@ -112,3 +112,16 @@ describe("所在地の照合（addressAppearsIn）", () => {
     expect(addressMatchKeys("大阪府大阪市").every((k) => k.length >= 6)).toBe(true);
   });
 });
+
+describe("所在地照合の1文字ゆれ", () => {
+  it("異体字で1文字だけ違う住所を同じとみなす", () => {
+    // 実データ: 登記「三木市吉川町鍛治屋」 vs 自社サイト「三木市吉川町鍛冶屋」
+    expect(addressAppearsIn("兵庫県三木市吉川町鍛治屋字中之坪２８７番地の１", "兵庫県三木市吉川町鍛冶屋中之坪字２８７－１")).toBe(true);
+  });
+
+  it("別の住所を誤って一致させない", () => {
+    expect(addressAppearsIn("兵庫県神戸市西区森友２丁目３７番地１号", "兵庫県淡路市志筑2570-2")).toBe(false);
+    expect(addressAppearsIn("京都府京都市右京区西院西平町１０番地", "京都府京都市南区久世大薮町425-4")).toBe(false);
+    expect(addressAppearsIn("京都府京都市山科区大塚檀ノ浦２９番地の１５", "山形県長井市九野本2133")).toBe(false);
+  });
+});

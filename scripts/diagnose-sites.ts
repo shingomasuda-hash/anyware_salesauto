@@ -18,6 +18,7 @@ config();
 
 import { sql } from "drizzle-orm";
 import { getDb, rawRows } from "../src/db";
+import { warnIfBehindRemote } from "./lib/git-freshness";
 import { addressAppearsIn, addressMatchKeys, normalizePhone } from "../src/lib/companies/normalize";
 import { rejectOfficialSiteUrl } from "../src/lib/companies/official-site";
 import { extractHtml } from "../src/lib/crawler/extract";
@@ -74,6 +75,7 @@ function show(title: string, rows: [string, number][], total: number) {
 }
 
 async function main() {
+  await warnIfBehindRemote();
   const db = getDb();
   const rows = await rawRows<Row>(
     db,

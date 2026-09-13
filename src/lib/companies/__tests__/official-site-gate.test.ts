@@ -318,3 +318,10 @@ describe("Web検索で見つけた公式サイトが合格できる（55点天�
     expect(held).toMatchObject({ owned: true, confirmed: false });
   });
 });
+
+describe("ハイフンつきの識別子も名簿ページと見なす", () => {
+  it("数字をハイフンでつないだ識別子を見分ける", () => {
+    // 実データ: https://kyobusi.kyoto/company/1578-1599038562/
+    expect(looksLikeRecordPageUrl("https://kyobusi.kyoto/company/1578-1599038562/")).toBe(true);
+  });
+});
