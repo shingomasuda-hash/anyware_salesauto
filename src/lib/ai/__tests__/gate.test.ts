@@ -8,13 +8,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { shouldEnqueueAnalysis } from "../gate";
 
-const mocks = vi.hoisted(() => ({ requireRecruitSignal: true }));
+const mocks = vi.hoisted(() => ({ requireRecruitSignal: true, analysisEnabled: true }));
 vi.mock("@/lib/config/ai", () => ({
-  getAiConfig: () => ({ requireRecruitSignal: mocks.requireRecruitSignal }),
+  getAiConfig: () => ({ requireRecruitSignal: mocks.requireRecruitSignal, analysisEnabled: mocks.analysisEnabled }),
 }));
 
 afterEach(() => {
   mocks.requireRecruitSignal = true;
+  mocks.analysisEnabled = true;
 });
 
 describe("shouldEnqueueAnalysis", () => {
@@ -39,5 +40,20 @@ describe("shouldEnqueueAnalysis", () => {
   it("設定を外せば痕跡が無くても分析する", () => {
     mocks.requireRecruitSignal = false;
     expect(shouldEnqueueAnalysis("no_signal").ok).toBe(true);
+  });
+});
+
+describe("リスト作成だけを行う設定", () => {
+  it("AI分析を無効にすると分析ジョブを投入しない", () => {
+    // 探索・公式サイト確認・クロールだけを回したいとき（AI費用をかけない）
+    mocks.analysisEnabled = false;
+    // 採用に積極的な企業でも投入しない
+    const result = shouldEnqueueAnalysis("active_recruit");
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("AI_ANALYSIS_ENABLED");
+  });
+
+  it("既定では投入する", () => {
+    expect(shouldEnqueueAnalysis("active_recruit").ok).toBe(true);
   });
 });

@@ -44,6 +44,11 @@ const envSchema = z.object({
     .enum(["true", "false"])
     .default("true")
     .transform((v) => v === "true"),
+  /** AI分析を行うか。false にするとリスト作成（探索・公式サイト確認・クロール）だけを行う */
+  AI_ANALYSIS_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
 
   // --- 企業ごとの文面（取材依頼 / サービス提案） ---
   /** 何を依頼する文面か。既定は取材依頼 */
