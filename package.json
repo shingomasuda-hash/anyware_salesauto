@@ -26,6 +26,7 @@
     "seed": "tsx scripts/seed.ts",
     "jobs:run": "tsx scripts/run-jobs.ts",
     "outreach": "tsx scripts/outreach.ts",
+    "outreach:show": "tsx scripts/outreach-show.ts",
     "auth:create-user": "tsx scripts/create-user.ts",
     "preflight": "tsx scripts/preflight.ts",
     "env:check": "tsx scripts/env-check.ts",
