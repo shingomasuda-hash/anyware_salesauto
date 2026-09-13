@@ -22,6 +22,8 @@ export const REQUIRED_COLUMNS: Record<string, string[]> = {
     "recruit_target_reasons",
     "job_boards",
     "latest_analysis_id",
+    "outreach_status",
+    "contact_form_url",
   ],
   company_analysis: [
     "sales_priority_score",
@@ -46,6 +48,8 @@ export const REQUIRED_COLUMNS: Record<string, string[]> = {
     "has_outreach",
     "recruit_target",
     "job_boards",
+    "outreach_status",
+    "contact_form_url",
   ],
   discovery_runs: ["phase", "requested_count", "discovered_count", "promoted_count"],
   discovery_candidates: ["run_id", "status", "verification_score", "company_id"],

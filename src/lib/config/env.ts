@@ -48,9 +48,16 @@ const envSchema = z.object({
   // --- 企業ごとの文面（取材依頼 / サービス提案） ---
   /** 何を依頼する文面か。既定は取材依頼 */
   SALES_OUTREACH_PURPOSE: z.enum(["interview", "proposal"]).default("interview"),
-  /** 差出人 */
+  /** 差出人。営業フォームの入力にも使う。未設定の項目は推測せず空欄のまま人に任せる */
   SALES_SENDER_COMPANY: optionalString,
   SALES_SENDER_NAME: optionalString,
+  SALES_SENDER_NAME_KANA: optionalString,
+  SALES_SENDER_EMAIL: optionalString,
+  SALES_SENDER_PHONE: optionalString,
+  SALES_SENDER_DEPARTMENT: optionalString,
+  SALES_SENDER_ZIP: optionalString,
+  SALES_SENDER_ADDRESS: optionalString,
+  SALES_SENDER_URL: optionalString,
   /** 依頼したい次の行動（未設定なら目的ごとの既定文を使う） */
   SALES_OUTREACH_CTA: optionalString,
   /** 取材依頼: 何について取材したいか。未設定なら生成しない */

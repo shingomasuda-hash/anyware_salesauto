@@ -60,6 +60,10 @@ export const companies = pgTable(
     website_candidates: jsonArray("website_candidates"),
     contact_page_url: text("contact_page_url"),
     contact_form_url: text("contact_form_url"),
+    /** 営業フォームへの入力・送信の状態。送信は人が行い、ここはその記録 */
+    outreach_status: text("outreach_status").$type<OutreachStatus>().notNull().default("unsent"),
+    outreach_status_at: ts("outreach_status_at"),
+    outreach_note: text("outreach_note"),
     recruit_page_url: text("recruit_page_url"),
     // 営業ターゲットとしての採用状況（クロールで機械的に判定。AIは使わない）
     recruit_target: text("recruit_target").$type<RecruitTarget>(),
@@ -611,6 +615,9 @@ export const companyOverview = pgView("company_overview", {
   website_domain: text("website_domain"),
   contact_page_url: text("contact_page_url"),
   contact_form_url: text("contact_form_url"),
+  outreach_status: text("outreach_status").$type<OutreachStatus>().notNull(),
+  outreach_status_at: ts("outreach_status_at"),
+  outreach_note: text("outreach_note"),
   recruit_page_url: text("recruit_page_url"),
   recruit_target: text("recruit_target").$type<RecruitTarget>(),
   job_boards: jsonArray("job_boards"),
@@ -662,6 +669,7 @@ export type CompanySource = "gbiz" | "google_places" | "manual" | "import" | "mo
 export type VerificationStatus = "unverified" | "needs_review" | "verified" | "manual" | "no_website";
 export type SalesContactAllowed = "true" | "false" | "unknown";
 export type CrawlStatus = "not_crawled" | "crawling" | "crawled" | "failed" | "no_website";
+export type OutreachStatus = "unsent" | "opened" | "sent" | "skipped" | "failed";
 export type AnalysisStatus = "not_analyzed" | "analyzing" | "analyzed" | "failed";
 export type JobStatus = "pending" | "processing" | "completed" | "failed" | "retrying" | "cancelled";
 export type SearchJobItemStatus = "new" | "duplicate" | "skipped" | "failed";
