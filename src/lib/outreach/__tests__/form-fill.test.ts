@@ -4,7 +4,7 @@ import type { SenderProfile } from "../sender";
 
 const sender: SenderProfile = {
   company: "株式会社AnyWare",
-  name: "増田 慎吾",
+  name: "増田 紳吾",
   nameKana: "マスダ シンゴ",
   email: "shingo.masuda@any-ware.jp",
   phone: "06-1234-5678",
