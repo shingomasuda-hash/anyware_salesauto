@@ -292,11 +292,10 @@ export function checkDomainOwnership(input: DomainOwnershipInput): DomainOwnersh
     return { owned: true, confirmed: true, reason: "ドメイン名が会社名に由来" };
   }
 
-  // 候補がトップページそのものなら、ページ自体の照合で足りる（別途加点している）
-  if (isDomainRootUrl(input.url)) {
-    return { owned: true, confirmed: false, reason: "候補がトップページ（別途ページ本文で照合する）" };
-  }
-
+  // 候補がトップページそのものの場合も、以降と同じ照合を行う。
+  // ここで早期に打ち切ると、そのページに社名が出ていても「持ち主を確認できた」と
+  // 記録できず、加点されないまま 55点の天井に留まる（実データの候補URLは大半がトップページ）。
+  //
   // トップページを取得できなかった場合は判断を保留し、落とさない（取得失敗で誤って捨てないため）
   if (!input.rootTitle && !input.rootText) {
     return { owned: true, confirmed: false, reason: "トップページを確認できず保留" };

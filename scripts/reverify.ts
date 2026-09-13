@@ -88,6 +88,18 @@ async function main() {
   let stillShort = 0;
   let excluded = 0;
   const promoted: string[] = [];
+  // 結果が 0 件でも理由が分かるように内訳を残す（数字だけだと原因を特定できない）
+  const reasonTally = new Map<string, number>();
+  const scoreTally = new Map<string, number>();
+  const shortExamples: { name: string; url: string; before: number; after: number; reasons: string[] }[] = [];
+  const countUp = (map: Map<string, number>, key: string) => map.set(key, (map.get(key) ?? 0) + 1);
+  const bucket = (score: number) => {
+    if (score === 0) return "0点（ページを読めていない）";
+    if (score < 20) return "1-19点";
+    if (score < 40) return "20-39点";
+    if (score < 60) return "40-59点（あと少し）";
+    return "60点以上";
+  };
 
   for (const [i, row] of targets.entries()) {
     if ((i + 1) % 20 === 0) console.log(`  ${i + 1}/${targets.length}件`);
@@ -102,6 +114,9 @@ async function main() {
 
     const before = row.official_site_confidence ?? 0;
     const after = check.confidence ?? 0;
+
+    for (const reason of check.reasons) countUp(reasonTally, reason);
+    countUp(scoreTally, bucket(check.confidence ?? 0));
 
     if (!check.url) {
       excluded++;
@@ -142,6 +157,7 @@ async function main() {
       }
     } else {
       stillShort++;
+      if (shortExamples.length < 10) shortExamples.push({ name: row.name, url: check.url, before, after, reasons: check.reasons });
       if (apply) {
         await updateCandidate(db, row.id, {
           status: "rejected",
@@ -160,6 +176,21 @@ async function main() {
   console.log(`  名簿・ポータルとして除外:   ${excluded}件`);
   const rate = targets.length > 0 ? ((nowVerified / targets.length) * 100).toFixed(1) : "0.0";
   console.log(`  回収率: ${rate}%`);
+
+  const sorted = (map: Map<string, number>) => [...map.entries()].sort((a, b) => b[1] - a[1]);
+  console.log(`\n■ 判定後の信頼度`);
+  for (const [label, count] of sorted(scoreTally)) console.log(`  ${String(count).padStart(4)}件  ${label}`);
+  console.log(`\n■ 取れた加点・落ちた理由`);
+  for (const [label, count] of sorted(reasonTally)) console.log(`  ${String(count).padStart(4)}件  ${label}`);
+
+  if (shortExamples.length > 0) {
+    console.log(`\n■ まだ足りないものの例（何点足りないかを見る）`);
+    for (const e of shortExamples) {
+      console.log(`  ${e.name}: ${e.before}点 → ${e.after}点（60点必要）`);
+      console.log(`      ${e.url}`);
+      console.log(`      ${e.reasons.join(" / ") || "（加点なし）"}`);
+    }
+  }
 
   if (!apply) {
     console.log(`\n企業リストに追加するには --apply を付けてください（例: npm run db:reverify -- --apply）`);

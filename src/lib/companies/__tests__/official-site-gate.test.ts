@@ -325,3 +325,41 @@ describe("ハイフンつきの識別子も名簿ページと見なす", () => {
     expect(looksLikeRecordPageUrl("https://kyobusi.kyoto/company/1578-1599038562/")).toBe(true);
   });
 });
+
+describe("候補URLがトップページそのものの場合", () => {
+  // 早期 return で社名照合に到達せず、加点されないまま 55点の天井に留まっていた。
+  // 実データの候補URLは大半がトップページなので、再判定の回収率が 0% になった。
+  it("トップページに社名があれば持ち主を確認できたとする", () => {
+    const result = checkDomainOwnership({
+      companyName: "株式会社笠殿製作所",
+      url: "https://kasadono.co.jp",
+      rootTitle: "株式会社笠殿製作所",
+      rootText: "株式会社笠殿製作所 京都府京都市南区久世大薮町425-4 会社概要",
+    });
+    expect(result).toMatchObject({ owned: true, confirmed: true });
+  });
+
+  it("トップページ候補でも閾値を越えられる", () => {
+    const r = scoreOfficialSiteCandidate(
+      { companyName: "株式会社笠殿製作所", address: "京都府京都市南区久世大薮町425-4" },
+      {
+        url: "https://kasadono.co.jp",
+        source: "search",
+        title: "株式会社笠殿製作所",
+        pageText: "株式会社笠殿製作所 京都府京都市南区久世大薮町425-4 会社概要",
+        domainOwnershipConfirmed: true,
+      },
+    );
+    expect(r.confidence).toBeGreaterThanOrEqual(OFFICIAL_SITE_THRESHOLD);
+  });
+
+  it("トップページに社名が無ければ確認済みにしない", () => {
+    const result = checkDomainOwnership({
+      companyName: "株式会社笠殿製作所",
+      url: "https://example.co.jp",
+      rootTitle: "ものづくりのプロ",
+      rootText: "高精度加工でお応えします",
+    });
+    expect(result).toMatchObject({ owned: true, confirmed: false });
+  });
+});
