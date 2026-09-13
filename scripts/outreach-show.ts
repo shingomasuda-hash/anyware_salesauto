@@ -17,12 +17,14 @@ import { sql } from "drizzle-orm";
 import { getDb, rawRows } from "../src/db";
 import { getOutreachConfig, outreachLabel } from "../src/lib/config/outreach";
 import { getSenderProfile, missingSenderFields, SENDER_FIELD_LABEL } from "../src/lib/outreach/sender";
+import { checkContactForm } from "../src/lib/outreach/target";
 
 type Row = {
   id: string;
   company_name: string;
   prefecture: string | null;
   website_url: string | null;
+  verification_status: string | null;
   contact_form_url: string | null;
   recruit_target: string | null;
   sales_priority_rank: string | null;
@@ -61,7 +63,7 @@ async function main() {
 
   const rows = await rawRows<Row>(
     db,
-    sql`select c.id, c.company_name, c.prefecture, c.website_url, c.contact_form_url,
+    sql`select c.id, c.company_name, c.prefecture, c.website_url, c.verification_status, c.contact_form_url,
                c.recruit_target, c.outreach_status,
                a.sales_priority_rank, a.confidence_score,
                a.outreach_subject, a.outreach_body, a.outreach_personalization, a.outreach_hypothesis_note
@@ -84,7 +86,9 @@ async function main() {
     console.log(`[${i + 1}/${rows.length}] ${r.company_name}（${r.prefecture ?? "—"}）`);
     console.log("=".repeat(66));
     console.log(`公式サイト: ${r.website_url ?? "—"}`);
-    console.log(`問い合わせフォーム: ${r.contact_form_url ?? "（未検出・この企業はフォーム入力の対象外）"}`);
+    const form = checkContactForm({ websiteUrl: r.website_url, verificationStatus: r.verification_status, contactFormUrl: r.contact_form_url });
+    console.log(`問い合わせフォーム: ${r.contact_form_url ?? "（未検出）"}`);
+    console.log(`  ${form.ok ? "→ 自動入力の対象です" : `→ 対象外: ${form.reason}`}`);
     console.log(`採用状況: ${RECRUIT_LABEL[r.recruit_target ?? ""] ?? "—"}　営業ランク: ${r.sales_priority_rank ?? "—"}　確度: ${r.confidence_score ?? "—"}`);
     console.log(`送信状態: ${r.outreach_status}`);
 

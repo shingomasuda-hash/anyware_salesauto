@@ -32,12 +32,14 @@ import { getSenderProfile, missingSenderFields, SENDER_FIELD_LABEL } from "../sr
 import { planFormFill, type FormField } from "../src/lib/outreach/form-fill";
 import { EXTRACT_FORM_FIELDS } from "../src/lib/outreach/extract-form";
 import { getOutreachConfig, outreachLabel } from "../src/lib/config/outreach";
+import { checkContactForm } from "../src/lib/outreach/target";
 
 type Row = {
   id: string;
   company_name: string;
   prefecture: string | null;
   website_url: string | null;
+  verification_status: string | null;
   contact_form_url: string | null;
   contact_page_url: string | null;
   outreach_subject: string | null;
@@ -67,9 +69,10 @@ async function main() {
     console.log(`\n未設定の項目は入力せず空欄のままにします（架空の連絡先を送らないため）。`);
   }
 
-  const rows = await rawRows<Row>(
+  const pool = await rawRows<Row>(
     db,
-    sql`select id, company_name, prefecture, website_url, contact_form_url, contact_page_url,
+    sql`select id, company_name, prefecture, website_url, verification_status,
+               contact_form_url, contact_page_url,
                outreach_subject, outreach_body, outreach_status
         from company_overview
         where outreach_body is not null
@@ -78,12 +81,33 @@ async function main() {
           and outreach_status in ('unsent','failed')
           ${companyId ? sql`and id = ${companyId}` : sql``}
         order by sales_priority_score desc nulls last
-        limit ${limit}`,
+        limit ${limit * 5}`,
   );
+
+  // そのフォームがその企業のものかを必ず確認する。
+  // 「フォームのURLがある」だけを条件にしていたため、企業ディレクトリの
+  // クチコミ投稿フォームに取材依頼文を入力してしまった。
+  const checked = pool.map((row) => ({
+    row,
+    check: checkContactForm({ websiteUrl: row.website_url, verificationStatus: row.verification_status, contactFormUrl: row.contact_form_url }),
+  }));
+  const rows = checked.filter((c) => c.check.ok).map((c) => c.row).slice(0, limit);
+  const blocked = checked.filter((c) => !c.check.ok);
+
+  if (blocked.length > 0) {
+    console.log(`\n送信対象から外した企業: ${blocked.length}社（そのフォームはその企業のものではありません）`);
+    for (const b of blocked.slice(0, 10)) {
+      console.log(`  ${b.row.company_name}`);
+      console.log(`    ${b.row.contact_form_url}`);
+      console.log(`    → ${b.check.reason}`);
+    }
+    if (blocked.length > 10) console.log(`  … 他 ${blocked.length - 10}社`);
+    console.log("  古い記録が残っている場合は npm run maintain -- --apply で整理されます。");
+  }
 
   if (rows.length === 0) {
     console.log("\n対象の企業がありません。");
-    console.log("条件: 取材依頼文が作成済み・問い合わせフォームのURLがある・営業可・未送信");
+    console.log("条件: 取材依頼文が作成済み・公式サイト確認済み・公式サイトと同じドメインのフォームがある・営業可・未送信");
     return;
   }
 
@@ -114,6 +138,12 @@ async function main() {
     console.log(`\n${"=".repeat(60)}`);
     console.log(`[${i + 1}/${rows.length}] ${row.company_name}`);
     console.log("=".repeat(60));
+    // 開く直前にもう一度確認する（取得後にデータが変わっている場合の歯止め）
+    const guard = checkContactForm({ websiteUrl: row.website_url, verificationStatus: row.verification_status, contactFormUrl: row.contact_form_url });
+    if (!guard.ok) {
+      console.log(`開きません: ${guard.reason}`);
+      continue;
+    }
     const page = await context.newPage();
     try {
       await page.goto(row.contact_form_url!, { waitUntil: "domcontentloaded", timeout: 30_000 });

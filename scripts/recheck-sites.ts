@@ -90,6 +90,7 @@ async function main() {
 
   if (bad.length === 0) {
     console.log("現在の基準で不適切なURLはありません。");
+    await clearOrphanedContacts(db);
     await restoreRejected(db);
     return;
   }
@@ -105,6 +106,7 @@ async function main() {
   if (!apply) {
     console.log(`\n外すには --apply を付けてください（例: npm run db:recheck-sites -- --apply）`);
     console.log("外した企業は「公式HP要確認」になり、一覧から除外されます。URL は履歴に残します。");
+    await clearOrphanedContacts(db);
     await restoreRejected(db);
     return;
   }
@@ -142,7 +144,57 @@ async function main() {
   console.log("そのページから拾っていた連絡先・採用ページ・SNSも消しました（別サイトの情報だったため）。");
   console.log("これらの企業は一覧から除外されます（フィルタ「公式HP未確認も表示」で確認できます）。");
 
+  await clearOrphanedContacts(db);
   await restoreRejected(db);
+}
+
+/**
+ * 公式サイトを外したのに、そのページから拾った連絡先が残っている企業を整理する。
+ *
+ * 連絡先を消す処理を追加したのは途中からで、それ以前に外した企業には
+ * 古い連絡先・問い合わせフォームのURLが残っている。
+ * そのため企業ディレクトリのフォームを「その企業のフォーム」として開いてしまった。
+ */
+async function clearOrphanedContacts(db: ReturnType<typeof getDb>) {
+  const rows = await rawRows<{ id: string; company_name: string; contact_form_url: string | null; email: string | null }>(
+    db,
+    sql`select id, company_name, contact_form_url, email
+        from companies
+        where website_url is null
+          and (contact_form_url is not null or contact_page_url is not null or email is not null
+               or recruit_page_url is not null or phone is not null)`,
+  );
+  if (rows.length === 0) return;
+
+  console.log(`\n■ 公式サイトが無いのに連絡先が残っている企業: ${rows.length}社`);
+  for (const r of rows.slice(0, 10)) {
+    console.log(`  ${r.company_name}  ${r.contact_form_url ?? r.email ?? ""}`);
+  }
+  if (rows.length > 10) console.log(`  … 他 ${rows.length - 10}社`);
+
+  if (!apply) {
+    console.log("  → --apply を付けると消します（別サイトから拾った情報のため）。");
+    return;
+  }
+  for (const r of rows) {
+    await updateCompany(db, r.id, {
+      email: null,
+      phone: null,
+      contact_page_url: null,
+      contact_form_url: null,
+      recruit_page_url: null,
+      recruit_target: null,
+      recruit_target_reasons: null,
+      job_boards: null,
+      instagram_url: null,
+      facebook_url: null,
+      x_url: null,
+      youtube_url: null,
+      linkedin_url: null,
+      tiktok_url: null,
+    });
+  }
+  console.log(`\n${rows.length}社の古い連絡先を消しました（営業拒否の記載は残しています）。`);
 }
 
 /**
