@@ -18,10 +18,46 @@ export interface OutreachContext {
   /** 実際に確認できた連絡先。ここに無い宛先を文面に書かせない */
   knownEmails: (string | null | undefined)[];
   knownPhones: (string | null | undefined)[];
+  /** 社名・差出人名など、文面に出てよい英字（社名がローマ字の企業があるため） */
+  allowedLatinWords?: string[];
 }
 
 const EMAIL_RE = /[\w.+-]+@[\w-]+\.[\w.-]{2,}/g;
 const PHONE_RE = /0\d{1,4}[-(\s]?\d{1,4}[-)\s]?\d{3,4}/g;
+
+/**
+ * 日本語の文面に混ざってよい英字。
+ * 実データで「実際の工夫や judgment を記事として紹介する」のように
+ * 英単語がそのまま出力された。日本語のメールとして不自然なので機械的に止める。
+ */
+const ALLOWED_LATIN_WORDS = new Set([
+  "dx", "it", "ai", "ict", "iot", "sns", "web", "url", "ec", "erp", "crm", "sfa", "rpa", "cad", "cam", "cnc",
+  "anyware", "http", "https", "co", "jp", "com", "ne", "or", "www", "pdf", "zoom", "teams", "meet", "ok",
+  "tel", "fax", "mail", "e-mail", "no", "vs", "qa",
+]);
+
+/** 日本語の文面に不自然な英単語が混ざっていないか */
+export function findForeignWords(body: string, extraAllowed: string[] = []): string[] {
+  const allowed = new Set([...ALLOWED_LATIN_WORDS, ...extraAllowed.map((w) => w.toLowerCase())]);
+  // メールアドレスとURLは英字の塊だが文面として正当なので、走査の対象から外す
+  const scrubbed = body.replace(EMAIL_RE, " ").replace(/https?:\/\/\S+/g, " ");
+  const words = scrubbed.match(/[A-Za-z][A-Za-z'-]{1,}/g) ?? [];
+  return [...new Set(words.filter((w) => !allowed.has(w.toLowerCase())))];
+}
+
+/**
+ * 情報源を文面に書いてはいけない。
+ * 実データで「掲載先は地域ポータル『なび京都』の事業者ページ」と書かれていた。
+ * どこで見つけたかを相手に伝える必要はなく、名簿サイト経由だと明かすのは失礼にあたる。
+ */
+const SOURCE_MENTION_RE =
+  /(なび京都|ツクリンク|法人情報|法人番号|国税庁|GビズINFO|ジーグローバル|事業者ページ|掲載ページ|ポータルサイト|名簿|データベースで(拝見|確認)|検索で(見つけ|拝見))/;
+
+/** 情報源への言及を含むか */
+export function findSourceMention(body: string): string | null {
+  const hit = body.match(SOURCE_MENTION_RE);
+  return hit ? hit[0] : null;
+}
 
 /**
  * 生成された営業文を送信可能か判定する。
@@ -62,6 +98,17 @@ export function reviewOutreach(raw: CompanyAnalysisOutput["sales_outreach"], con
     .filter((digits) => digits.length >= 10 && !allowedPhones.has(digits));
   if (inventedPhones.length > 0) {
     return { ok: false, reason: "確認できていない電話番号が文面に含まれていたため破棄しました" };
+  }
+
+  // 日本語のメールとしての体裁。連絡先の捏造より軽いので後に見る。
+  const foreign = findForeignWords(raw.body, context.allowedLatinWords ?? []);
+  if (foreign.length > 0) {
+    return { ok: false, reason: `日本語の文面に英単語が混ざっていたため破棄しました（${foreign.slice(0, 5).join(", ")}）` };
+  }
+
+  const source = findSourceMention(raw.body);
+  if (source) {
+    return { ok: false, reason: `情報源への言及（「${source}」）が含まれていたため破棄しました` };
   }
 
   return {

@@ -137,6 +137,10 @@ async function main() {
       youtube_url: null,
       linkedin_url: null,
       tiktok_url: null,
+      // 分析と文面はそのサイトの内容から作られている。別サイトの情報を根拠にした
+      // 文面をそのまま送ってしまうため、参照を外す（行は監査用に残す）。
+      latest_analysis_id: null,
+      analysis_status: "not_analyzed",
       // 営業拒否の記載は消さない（安全側に倒す）
     });
   }
@@ -162,18 +166,18 @@ async function clearOrphanedContacts(db: ReturnType<typeof getDb>) {
         from companies
         where website_url is null
           and (contact_form_url is not null or contact_page_url is not null or email is not null
-               or recruit_page_url is not null or phone is not null)`,
+               or recruit_page_url is not null or phone is not null or latest_analysis_id is not null)`,
   );
   if (rows.length === 0) return;
 
-  console.log(`\n■ 公式サイトが無いのに連絡先が残っている企業: ${rows.length}社`);
+  console.log(`\n■ 公式サイトが無いのに連絡先・分析が残っている企業: ${rows.length}社`);
   for (const r of rows.slice(0, 10)) {
     console.log(`  ${r.company_name}  ${r.contact_form_url ?? r.email ?? ""}`);
   }
   if (rows.length > 10) console.log(`  … 他 ${rows.length - 10}社`);
 
   if (!apply) {
-    console.log("  → --apply を付けると消します（別サイトから拾った情報のため）。");
+    console.log("  → --apply を付けると消します（別サイトから拾った情報を根拠にしているため）。");
     return;
   }
   for (const r of rows) {
@@ -192,9 +196,11 @@ async function clearOrphanedContacts(db: ReturnType<typeof getDb>) {
       youtube_url: null,
       linkedin_url: null,
       tiktok_url: null,
+      latest_analysis_id: null,
+      analysis_status: "not_analyzed",
     });
   }
-  console.log(`\n${rows.length}社の古い連絡先を消しました（営業拒否の記載は残しています）。`);
+  console.log(`\n${rows.length}社の古い連絡先と、別サイトを根拠にした分析・文面を外しました（営業拒否の記載は残しています）。`);
 }
 
 /**

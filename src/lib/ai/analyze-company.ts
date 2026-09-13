@@ -82,6 +82,13 @@ export async function analyzeCompany(db: Db, companyId: string, logger: Logger):
     knownEmails: [company.email],
     knownPhones: [company.phone],
     missingReason: outreachMissingHint(outreachConfig.purpose),
+    // 社名・差出人がローマ字の場合に英字判定で弾かれないようにする
+    allowedLatinWords: [
+      ...(company.company_name.match(/[A-Za-z][A-Za-z'-]{1,}/g) ?? []),
+      ...((outreachConfig.senderCompany ?? "").match(/[A-Za-z][A-Za-z'-]{1,}/g) ?? []),
+      ...((outreachConfig.senderName ?? "").match(/[A-Za-z][A-Za-z'-]{1,}/g) ?? []),
+      ...((outreachConfig.interviewMedium ?? "").match(/[A-Za-z][A-Za-z'-]{1,}/g) ?? []),
+    ],
   });
   if (!outreach.ok && out.sales_outreach) {
     await logger.warn(`${outreachLabel(outreachConfig.purpose)}を破棄`, { company: company.company_name, reason: outreach.reason });
