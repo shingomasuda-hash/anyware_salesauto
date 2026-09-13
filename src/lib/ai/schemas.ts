@@ -4,27 +4,19 @@ const score = z.number().int().min(0).max(100);
 const nullableScore = score.nullable();
 
 /**
- * AI の出力は細部がぶれる。厳格に検証して丸ごと失敗させると、
- * その企業の分析がすべて失われ、再試行の費用も無駄になる。
- * 実データでは「personalization が4件（上限3）」「employee_count_observed が0」
- * 「enum の値が想定外」で3社が失敗し、うち1社は再試行の上限まで使い切った。
+ * このスキーマは **Anthropic API に送る JSON Schema の生成にも使われる**。
+ * JSON Schema は変換（transform）や既定値への差し替え（catch）を表現できないため、
+ * ここには書けない。書くと API 呼び出し自体が失敗する（実際に全件失敗させた）。
  *
- * 安全に関わる判断（営業拒否・事実と推測の分離）は厳格なままにし、
- * 分類や件数のような些細なぶれは受け取り側で整える。
+ * 出力のぶれは、検証の前に normalizeAnalysisOutput で整える。
  */
 
-/** 想定外の値を既定値に倒す enum */
-function lenientEnum<const T extends readonly [string, ...string[]]>(values: T, fallback: T[number]) {
-  return z.enum(values).catch(fallback as T[number]);
-}
+const EVIDENCE_CATEGORIES = ["company", "business", "recruiting", "web", "sns", "digital_marketing", "dx", "sales_restriction", "contact", "other"] as const;
 
 export const evidenceSchema = z.object({
-  category: lenientEnum(
-    ["company", "business", "recruiting", "web", "sns", "digital_marketing", "dx", "sales_restriction", "contact", "other"],
-    "other",
-  ),
-  source_url: z.string().catch(""),
-  evidence_text: z.string().max(200).catch(""),
+  category: z.enum(EVIDENCE_CATEGORIES),
+  source_url: z.string(),
+  evidence_text: z.string().min(1).max(200),
 });
 
 /**
@@ -38,13 +30,12 @@ export const evidenceSchema = z.object({
 export const companyAnalysisOutputSchema = z.object({
   company_summary: z.string().max(300),
   business_summary: z.string().max(300),
-  recruiting_status: lenientEnum(["active", "inactive", "unknown"], "unknown"),
+  recruiting_status: z.enum(["active", "inactive", "unknown"]),
   recruiting_summary: z.string().max(300).nullable(),
   target_candidates: z.array(z.string().max(40)).max(5),
-  new_graduate_hiring: lenientEnum(["yes", "no", "unknown"], "unknown"),
-  mid_career_hiring: lenientEnum(["yes", "no", "unknown"], "unknown"),
-  // 0 を「不明」の意味で返してくることがあるため、null に倒す
-  employee_count_observed: z.number().int().nullable().transform((v) => (v !== null && v > 0 ? v : null)),
+  new_graduate_hiring: z.enum(["yes", "no", "unknown"]),
+  mid_career_hiring: z.enum(["yes", "no", "unknown"]),
+  employee_count_observed: z.number().int().positive().nullable(),
   scores: z.object({
     recruitment_page_quality_score: nullableScore,
     recruitment_issue_score: nullableScore,
@@ -74,14 +65,12 @@ export const companyAnalysisOutputSchema = z.object({
       subject: z.string().max(60),
       body: z.string().max(700),
       /** 文面で触れたその企業固有の事実（observed_facts から。監査用） */
-      // 件数が多い分には害がないので、超過分は切り捨てて受け取る
-      personalization: z.array(z.string().max(120)).transform((v) => v.slice(0, 3)),
+      personalization: z.array(z.string().max(120)).max(3),
       /** 推測に基づく部分があれば明示する */
       hypothesis_note: z.string().max(150).nullable(),
     })
     .nullable(),
-  // 本文が空の根拠は監査の役に立たないので除き、件数の超過は切り捨てる
-  evidence: z.array(evidenceSchema).transform((v) => v.filter((e) => e.evidence_text.trim().length > 0).slice(0, 8)),
+  evidence: z.array(evidenceSchema).max(8),
   analysis_reason: z.string().max(500),
   confidence_score: score,
 });
@@ -89,8 +78,56 @@ export const companyAnalysisOutputSchema = z.object({
 export type CompanyAnalysisOutput = z.infer<typeof companyAnalysisOutputSchema>;
 
 /** 不正 JSON / スキーマ違反時に安全に検証する */
+const RECRUITING_STATUSES = ["active", "inactive", "unknown"] as const;
+const YES_NO_UNKNOWN = ["yes", "no", "unknown"] as const;
+
+function pickEnum<T extends readonly string[]>(value: unknown, values: T, fallback: T[number]): T[number] {
+  return typeof value === "string" && (values as readonly string[]).includes(value) ? (value as T[number]) : fallback;
+}
+
+/**
+ * 検証の前に、AI 出力の些細なぶれを整える。
+ *
+ * スキーマ側を緩めることはできない（API に送る JSON Schema の生成に使うため）。
+ * 厳格に検証して丸ごと失敗させると、その企業の分析がすべて失われ、
+ * 再試行の費用も無駄になる。実データでは
+ * 「personalization が4件（上限3）」「employee_count_observed が0」
+ * 「enum の値が想定外」で分析が失われた。
+ *
+ * スコアと confidence は営業ランクの計算に直結するため、ここでは触らない。
+ * 範囲外なら検証で弾く。
+ */
+export function normalizeAnalysisOutput(raw: unknown): unknown {
+  if (typeof raw !== "object" || raw === null) return raw;
+  const o = { ...(raw as Record<string, unknown>) };
+
+  o.recruiting_status = pickEnum(o.recruiting_status, RECRUITING_STATUSES, "unknown");
+  o.new_graduate_hiring = pickEnum(o.new_graduate_hiring, YES_NO_UNKNOWN, "unknown");
+  o.mid_career_hiring = pickEnum(o.mid_career_hiring, YES_NO_UNKNOWN, "unknown");
+
+  // 0 や負数を「不明」の意味で返してくることがある
+  if (typeof o.employee_count_observed === "number" && o.employee_count_observed <= 0) o.employee_count_observed = null;
+
+  if (Array.isArray(o.evidence)) {
+    o.evidence = o.evidence
+      .filter((e): e is Record<string, unknown> => typeof e === "object" && e !== null)
+      .map((e): Record<string, unknown> => ({ ...e, category: pickEnum(e.category, EVIDENCE_CATEGORIES, "other") }))
+      // 本文が空の根拠は監査の役に立たない
+      .filter((e) => typeof e.evidence_text === "string" && e.evidence_text.trim().length > 0)
+      .slice(0, 8);
+  }
+
+  if (typeof o.sales_outreach === "object" && o.sales_outreach !== null) {
+    const outreach = { ...(o.sales_outreach as Record<string, unknown>) };
+    if (Array.isArray(outreach.personalization)) outreach.personalization = outreach.personalization.slice(0, 3);
+    o.sales_outreach = outreach;
+  }
+
+  return o;
+}
+
 export function parseAnalysisOutput(raw: unknown): { ok: true; data: CompanyAnalysisOutput } | { ok: false; error: string } {
-  const parsed = companyAnalysisOutputSchema.safeParse(raw);
+  const parsed = companyAnalysisOutputSchema.safeParse(normalizeAnalysisOutput(raw));
   if (parsed.success) return { ok: true, data: parsed.data };
   return { ok: false, error: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") };
 }

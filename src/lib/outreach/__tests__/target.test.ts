@@ -62,3 +62,30 @@ describe("送ってよいフォームかの判定", () => {
     expect(isSameSite("navikyo.com", "honda-seiki.co.jp")).toBe(false);
   });
 });
+
+describe("問い合わせフォームではないページを使わない", () => {
+  // クロール時の判定を厳しくしても、既に記録された URL には反映されない。
+  // 実データで採用エントリーページと特商法ページが送信対象に残っていた。
+  it.each([
+    ["採用ページ", "https://daito-seiki.co.jp/recruit/"],
+    ["エントリーフォーム", "https://www.kogase.com/entry/"],
+    ["特定商取引法の表記", "https://mizuwajc.co.jp/shop/ownerInformation.html"],
+    ["利用規約", "https://example.co.jp/kiyaku.html"],
+  ])("%s を除外する", (_label, contactFormUrl) => {
+    const site = `https://${new URL(contactFormUrl).host}`;
+    const result = checkContactForm({ websiteUrl: site, verificationStatus: "verified", contactFormUrl });
+    expect(result.ok).toBe(false);
+  });
+
+  it("通常の問い合わせフォームは通す", () => {
+    for (const url of [
+      "http://mori-denki.co.jp/contact.html",
+      "https://www.sanpou-k.jp/contact.html",
+      "http://www.risyo-v.co.jp/contacts/",
+      "https://aoi-group.com/contact/",
+    ]) {
+      const site = `https://${new URL(url).host}`;
+      expect(checkContactForm({ websiteUrl: site, verificationStatus: "verified", contactFormUrl: url }).ok, url).toBe(true);
+    }
+  });
+});

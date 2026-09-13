@@ -1,5 +1,6 @@
 import { extractDomain } from "@/lib/companies/normalize";
 import { rejectOfficialSiteUrl } from "@/lib/companies/official-site";
+import { NOT_CONTACT_FORM_URL } from "@/lib/crawler/contacts";
 
 /**
  * その問い合わせフォームに送ってよいかを判断する。
@@ -43,6 +44,13 @@ export function checkContactForm(target: ContactFormTarget): ContactFormCheck {
 
   const rejected = rejectOfficialSiteUrl(target.contactFormUrl);
   if (rejected) return { ok: false, reason: `フォームのURLが企業のものではありません: ${rejected}` };
+
+  // 問い合わせフォームではないページ（採用エントリー・特商法・規約など）。
+  // クロール時の判定を厳しくしても、既に記録された URL には反映されないため、
+  // 使う直前にも同じ一覧で確認する。
+  if (NOT_CONTACT_FORM_URL.test(target.contactFormUrl)) {
+    return { ok: false, reason: "問い合わせフォームではないページです（採用エントリー・特商法・規約など）" };
+  }
 
   const siteDomain = extractDomain(target.websiteUrl);
   const formDomain = extractDomain(target.contactFormUrl);

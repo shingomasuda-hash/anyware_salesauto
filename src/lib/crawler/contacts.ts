@@ -133,8 +133,8 @@ export function selectCompanyEmail(emails: string[], siteDomain: string | null):
  * 問い合わせフォームとして登録していた。これらのページには問い合わせ先が書かれているため
  * 「お問い合わせ」という語では区別できない。URL と内容の両方で除外する。
  */
-const NOT_CONTACT_FORM_URL = /(tokushoho|tokutei|ownerinformation|owner_info|privacy|policy|terms|kiyaku|sitemap|law|agreement|recruit|entry|mypage|login|cart|order)/i;
-const NOT_CONTACT_FORM_TEXT = /(特定商取引法|特商法に基づく|プライバシーポリシー|個人情報保護方針|利用規約|サイトマップ)/;
+export const NOT_CONTACT_FORM_URL = /(tokushoho|tokutei|ownerinformation|owner_info|privacy|policy|terms|kiyaku|sitemap|law|agreement|recruit|entry|mypage|login|cart|order)/i;
+export const NOT_CONTACT_FORM_TEXT = /(特定商取引法|特商法に基づく|プライバシーポリシー|個人情報保護方針|利用規約|サイトマップ)/;
 
 /**
  * 問い合わせフォームのあるページか。
