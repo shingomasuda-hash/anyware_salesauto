@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractJsonObject, parseAnalysisOutput } from "../schemas";
+import { companyAnalysisOutputSchema, extractJsonObject, parseAnalysisOutput } from "../schemas";
 import { MockAiProvider } from "../mock";
 
 const valid = {
@@ -37,10 +37,16 @@ describe("parseAnalysisOutput", () => {
     const r = parseAnalysisOutput(valid);
     expect(r.ok).toBe(true);
   });
-  it("rejects out-of-range scores and unknown enums", () => {
+  it("rejects out-of-range scores", () => {
+    // スコアは営業ランクの計算に直結するため、範囲外は受け取らない
     expect(parseAnalysisOutput({ ...valid, scores: { ...valid.scores, web_quality_score: 120 } }).ok).toBe(false);
-    expect(parseAnalysisOutput({ ...valid, recruiting_status: "maybe" }).ok).toBe(false);
     expect(parseAnalysisOutput({ ...valid, confidence_score: "high" }).ok).toBe(false);
+  });
+  it("accepts unknown enum values by falling back", () => {
+    // 分類のぶれで分析を丸ごと失うほうが損失が大きい（実データで3社が失敗した）
+    const r = parseAnalysisOutput({ ...valid, recruiting_status: "maybe" });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.data.recruiting_status).toBe("unknown");
   });
   it("rejects missing required fields with a readable error", () => {
     const r = parseAnalysisOutput({ company_summary: "x" });
@@ -101,5 +107,48 @@ describe("営業文（sales_outreach）", () => {
 
   it("推測の注記は省略できる", () => {
     expect(parseAnalysisOutput({ ...valid, sales_outreach: { ...outreach, hypothesis_note: null } }).ok).toBe(true);
+  });
+});
+
+describe("AI出力のぶれを受け止める", () => {
+  // 厳格に検証して丸ごと失敗させると、その企業の分析がすべて失われ、
+  // 再試行の費用も無駄になる。実データで3社が失敗し1社は完全に失われた。
+  const parse = (patch: Record<string, unknown>) => companyAnalysisOutputSchema.safeParse({ ...valid, ...patch });
+
+  it("想定外の enum を既定値に倒す", () => {
+    const r = parse({ recruiting_status: "recruiting" });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.recruiting_status).toBe("unknown");
+  });
+
+  it("従業員数の0を不明として扱う", () => {
+    const r = parse({ employee_count_observed: 0 });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.employee_count_observed).toBeNull();
+  });
+
+  it("本文が空の根拠を取り除く", () => {
+    const r = parse({ evidence: [{ category: "company", source_url: "https://x", evidence_text: "" }] });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.evidence).toHaveLength(0);
+  });
+
+  it("想定外の根拠カテゴリを other に倒す", () => {
+    const r = parse({ evidence: [{ category: "history", source_url: "https://x", evidence_text: "創業60年" }] });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.evidence[0].category).toBe("other");
+  });
+
+  it("固有の事実が上限を超えても切り捨てて受け取る", () => {
+    const r = parse({
+      sales_outreach: {
+        subject: "取材のお願い",
+        body: "本文",
+        personalization: ["事実1", "事実2", "事実3", "事実4"],
+        hypothesis_note: null,
+      },
+    });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.sales_outreach?.personalization).toHaveLength(3);
   });
 });

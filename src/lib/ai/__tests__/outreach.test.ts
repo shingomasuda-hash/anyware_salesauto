@@ -117,3 +117,23 @@ describe("日本語の文面としての体裁", () => {
     }
   });
 });
+
+describe("略語・規格名は英単語として弾かない", () => {
+  const base = { subject: "取材のお願い", personalization: ["創業60年"], hypothesis_note: null };
+  const context = { salesContactAllowed: "unknown" as const, knownEmails: [], knownPhones: [] };
+
+  it.each([
+    ["NC旋盤", "NC旋盤による精密加工に取り組まれている点が印象に残りました。"],
+    ["ISO・KES", "ISO9001とKES環境マネジメントの認証を取得されている点を拝見しました。"],
+    ["JASIS", "JASISへの出展実績を拝見し、ぜひお話を伺いたく存じます。"],
+    ["STEPファイル", "STEPファイルでの受け渡しに対応されている点が印象に残りました。"],
+  ])("%s を含む文面は通す", (_label, body) => {
+    // 実データでこれらが破棄され、5社の文面が無駄になった
+    expect(reviewOutreach({ ...base, body }, context).ok).toBe(true);
+  });
+
+  it("小文字を含む一般英単語は引き続き弾く", () => {
+    const result = reviewOutreach({ ...base, body: "実際の工夫や judgment を紹介いたします。" }, context);
+    expect(result.ok).toBe(false);
+  });
+});

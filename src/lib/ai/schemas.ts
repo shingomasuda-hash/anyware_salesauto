@@ -3,10 +3,28 @@ import { z } from "zod";
 const score = z.number().int().min(0).max(100);
 const nullableScore = score.nullable();
 
+/**
+ * AI の出力は細部がぶれる。厳格に検証して丸ごと失敗させると、
+ * その企業の分析がすべて失われ、再試行の費用も無駄になる。
+ * 実データでは「personalization が4件（上限3）」「employee_count_observed が0」
+ * 「enum の値が想定外」で3社が失敗し、うち1社は再試行の上限まで使い切った。
+ *
+ * 安全に関わる判断（営業拒否・事実と推測の分離）は厳格なままにし、
+ * 分類や件数のような些細なぶれは受け取り側で整える。
+ */
+
+/** 想定外の値を既定値に倒す enum */
+function lenientEnum<const T extends readonly [string, ...string[]]>(values: T, fallback: T[number]) {
+  return z.enum(values).catch(fallback as T[number]);
+}
+
 export const evidenceSchema = z.object({
-  category: z.enum(["company", "business", "recruiting", "web", "sns", "digital_marketing", "dx", "sales_restriction", "contact", "other"]),
-  source_url: z.string(),
-  evidence_text: z.string().min(1).max(200),
+  category: lenientEnum(
+    ["company", "business", "recruiting", "web", "sns", "digital_marketing", "dx", "sales_restriction", "contact", "other"],
+    "other",
+  ),
+  source_url: z.string().catch(""),
+  evidence_text: z.string().max(200).catch(""),
 });
 
 /**
@@ -20,12 +38,13 @@ export const evidenceSchema = z.object({
 export const companyAnalysisOutputSchema = z.object({
   company_summary: z.string().max(300),
   business_summary: z.string().max(300),
-  recruiting_status: z.enum(["active", "inactive", "unknown"]),
+  recruiting_status: lenientEnum(["active", "inactive", "unknown"], "unknown"),
   recruiting_summary: z.string().max(300).nullable(),
   target_candidates: z.array(z.string().max(40)).max(5),
-  new_graduate_hiring: z.enum(["yes", "no", "unknown"]),
-  mid_career_hiring: z.enum(["yes", "no", "unknown"]),
-  employee_count_observed: z.number().int().positive().nullable(),
+  new_graduate_hiring: lenientEnum(["yes", "no", "unknown"], "unknown"),
+  mid_career_hiring: lenientEnum(["yes", "no", "unknown"], "unknown"),
+  // 0 を「不明」の意味で返してくることがあるため、null に倒す
+  employee_count_observed: z.number().int().nullable().transform((v) => (v !== null && v > 0 ? v : null)),
   scores: z.object({
     recruitment_page_quality_score: nullableScore,
     recruitment_issue_score: nullableScore,
@@ -55,12 +74,14 @@ export const companyAnalysisOutputSchema = z.object({
       subject: z.string().max(60),
       body: z.string().max(700),
       /** 文面で触れたその企業固有の事実（observed_facts から。監査用） */
-      personalization: z.array(z.string().max(120)).max(3),
+      // 件数が多い分には害がないので、超過分は切り捨てて受け取る
+      personalization: z.array(z.string().max(120)).transform((v) => v.slice(0, 3)),
       /** 推測に基づく部分があれば明示する */
       hypothesis_note: z.string().max(150).nullable(),
     })
     .nullable(),
-  evidence: z.array(evidenceSchema).max(8),
+  // 本文が空の根拠は監査の役に立たないので除き、件数の超過は切り捨てる
+  evidence: z.array(evidenceSchema).transform((v) => v.filter((e) => e.evidence_text.trim().length > 0).slice(0, 8)),
   analysis_reason: z.string().max(500),
   confidence_score: score,
 });

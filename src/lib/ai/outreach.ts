@@ -42,7 +42,18 @@ export function findForeignWords(body: string, extraAllowed: string[] = []): str
   // メールアドレスとURLは英字の塊だが文面として正当なので、走査の対象から外す
   const scrubbed = body.replace(EMAIL_RE, " ").replace(/https?:\/\/\S+/g, " ");
   const words = scrubbed.match(/[A-Za-z][A-Za-z'-]{1,}/g) ?? [];
-  return [...new Set(words.filter((w) => !allowed.has(w.toLowerCase())))];
+  return [
+    ...new Set(
+      words.filter((w) => {
+        if (allowed.has(w.toLowerCase())) return false;
+        // 全て大文字の語は略語・規格名・固有名詞とみなして許す。
+        // NC旋盤・ISO・KES・JASIS・STEPファイルなど、日本語の文書で普通に使われる。
+        // 弾きたいのは judgment のような一般英単語（小文字を含む）。
+        if (/^[A-Z0-9-]+$/.test(w)) return false;
+        return true;
+      }),
+    ),
+  ];
 }
 
 /**
