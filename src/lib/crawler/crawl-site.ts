@@ -142,7 +142,7 @@ export async function crawlSite(homeUrl: string, options: CrawlOptions = {}): Pr
     if (options.onPage) await options.onPage(page);
 
     if (pageType === "contact" && !summary.contactPageUrl) summary.contactPageUrl = res.finalUrl;
-    if (!summary.contactFormUrl && looksLikeContactForm(res.finalUrl, extracted.hasForm, extracted.text)) summary.contactFormUrl = res.finalUrl;
+    if (!summary.contactFormUrl && looksLikeContactForm(res.finalUrl, extracted.hasForm, extracted.text, { hasTextarea: extracted.hasTextarea, formFieldCount: extracted.formFieldCount })) summary.contactFormUrl = res.finalUrl;
     if ((pageType === "recruit" || pageType === "recruit_new_graduate" || pageType === "recruit_mid_career" || pageType === "job_listing") && !summary.recruitPageUrl) {
       summary.recruitPageUrl = res.finalUrl;
     }

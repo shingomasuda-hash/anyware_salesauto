@@ -6,6 +6,10 @@ export interface ExtractedHtml {
   text: string;
   links: ExtractedLink[];
   hasForm: boolean;
+  /** 本文を書く欄（textarea）があるか。問い合わせフォームの判定に使う */
+  hasTextarea: boolean;
+  /** 入力欄の数（検索ボックスと問い合わせフォームを区別する） */
+  formFieldCount: number;
   metaDescription: string | null;
 }
 
@@ -34,6 +38,12 @@ export function extractHtml(html: string, baseUrl: string, maxTextChars: number)
   });
 
   const hasForm = $("form").length > 0;
+  // 検索ボックスだけのページを問い合わせフォームと誤認しないよう、中身を数える
+  const hasTextarea = $("form textarea").length > 0;
+  const formFieldCount = $("form input, form textarea, form select").filter((_, el) => {
+    const type = ($(el).attr("type") ?? "text").toLowerCase();
+    return !["hidden", "submit", "button", "reset", "image"].includes(type);
+  }).length;
 
   NOISE_SELECTORS.forEach((sel) => $(sel).remove());
   // 本文候補: main / article を優先、なければ body
@@ -48,7 +58,7 @@ export function extractHtml(html: string, baseUrl: string, maxTextChars: number)
   text = collapseWhitespace(text);
   if (text.length > maxTextChars) text = text.slice(0, maxTextChars);
 
-  return { title, text, links, hasForm, metaDescription };
+  return { title, text, links, hasForm, hasTextarea, formFieldCount, metaDescription };
 }
 
 export function collapseWhitespace(s: string): string {

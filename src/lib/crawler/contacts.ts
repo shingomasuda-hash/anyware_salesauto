@@ -127,7 +127,44 @@ export function selectCompanyEmail(emails: string[], siteDomain: string | null):
 }
 
 /** 問い合わせフォームらしさの判定 */
-export function looksLikeContactForm(url: string, hasForm: boolean, text: string): boolean {
+/**
+ * 問い合わせフォームではないページ。
+ * 実データで、通販の特定商取引法に基づく表記のページ（/shop/ownerInformation.html）を
+ * 問い合わせフォームとして登録していた。これらのページには問い合わせ先が書かれているため
+ * 「お問い合わせ」という語では区別できない。URL と内容の両方で除外する。
+ */
+const NOT_CONTACT_FORM_URL = /(tokushoho|tokutei|ownerinformation|owner_info|privacy|policy|terms|kiyaku|sitemap|law|agreement|recruit|entry|mypage|login|cart|order)/i;
+const NOT_CONTACT_FORM_TEXT = /(特定商取引法|特商法に基づく|プライバシーポリシー|個人情報保護方針|利用規約|サイトマップ)/;
+
+/**
+ * 問い合わせフォームのあるページか。
+ *
+ * hasForm は <form> が1つでもあれば true になるため、検索ボックスだけのページも通る。
+ * 問い合わせフォームは本文を書く欄（textarea）を持つのが普通なので、そこで区別する。
+ * textarea が無い場合でも、入力欄が3つ以上あれば問い合わせフォームとみなす
+ * （氏名・メール・用件を別々の1行入力にしているサイトがある）。
+ */
+export function looksLikeContactForm(
+  url: string,
+  hasForm: boolean,
+  text: string,
+  options: { hasTextarea?: boolean; formFieldCount?: number } = {},
+): boolean {
   if (!hasForm) return false;
-  return /contact|inquiry|toiawase|form/i.test(url) || /お問い?合わせ|お問合せ|ご相談/.test(text.slice(0, 2000));
+  if (NOT_CONTACT_FORM_URL.test(url)) return false;
+
+  const head = text.slice(0, 2000);
+  if (NOT_CONTACT_FORM_TEXT.test(head)) return false;
+
+  // URL が問い合わせページだと示しているなら、フォームがあれば足りる。
+  // 検索ボックスはどのページにもあるが、URL が /contact/ や /inquiry.php のページの
+  // フォームは問い合わせフォームとみなしてよい。
+  if (/contact|inquiry|toiawase|form/i.test(url)) return true;
+
+  // 本文に「お問い合わせ」とあるだけでは弱い（会社概要や特商法のページにも書かれている）。
+  // この場合は問い合わせフォームの作りをしていることを求める。
+  if (!/お問い?合わせ|お問合せ|ご相談/.test(head)) return false;
+  // 入力欄の情報が無い場合（旧データ）は従来どおり通す
+  if (options.hasTextarea === undefined && options.formFieldCount === undefined) return true;
+  return options.hasTextarea === true || (options.formFieldCount ?? 0) >= 3;
 }

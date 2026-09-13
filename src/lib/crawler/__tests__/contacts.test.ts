@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractEmails, extractMailtoEmails, extractPhones, extractSocialLinks, selectCompanyEmail } from "../contacts";
+import { extractEmails, extractMailtoEmails, extractPhones, extractSocialLinks, looksLikeContactForm, selectCompanyEmail } from "../contacts";
 
 describe("extractEmails", () => {
   it("extracts plain and obfuscated emails, ignoring images and placeholders", () => {
@@ -72,5 +72,48 @@ describe("selectCompanyEmail（企業の連絡先として保存してよいメ�
   it("ドメイン不明でもフリーメールなら採用、それ以外は不採用", () => {
     expect(selectCompanyEmail(["shop@gmail.com"], null)).toBe("shop@gmail.com");
     expect(selectCompanyEmail(["info@unknown-vendor.jp"], null)).toBeNull();
+  });
+});
+
+describe("問い合わせフォームの判定", () => {
+  const inquiryText = "お問い合わせはこちらのフォームからお願いいたします。";
+
+  it("本文欄のある問い合わせフォームを認める", () => {
+    expect(looksLikeContactForm("https://example.co.jp/contact/", true, inquiryText, { hasTextarea: true, formFieldCount: 6 })).toBe(true);
+  });
+
+  it("URLが問い合わせページを示していれば、最小限のフォームでも認める", () => {
+    // 実在サイトには入力欄が1つだけの問い合わせフォームもある
+    expect(looksLikeContactForm("https://example.co.jp/a/inquiry.php", true, inquiryText, { hasTextarea: false, formFieldCount: 1 })).toBe(true);
+  });
+
+  it("本文の言葉だけが根拠のときは、検索ボックスを問い合わせフォームにしない", () => {
+    // 会社概要ページの検索ボックス。hasForm だけでは区別できない
+    expect(looksLikeContactForm("https://example.co.jp/company/outline.html", true, inquiryText, { hasTextarea: false, formFieldCount: 1 })).toBe(false);
+  });
+
+  it("特定商取引法に基づく表記のページを除外する", () => {
+    // 実データ: https://mizuwajc.co.jp/shop/ownerInformation.html を
+    // 問い合わせフォームとして登録していた
+    expect(
+      looksLikeContactForm("https://mizuwajc.co.jp/shop/ownerInformation.html", true, "特定商取引法に基づく表記 お問い合わせ先", {
+        hasTextarea: true,
+        formFieldCount: 5,
+      }),
+    ).toBe(false);
+  });
+
+  it("プライバシーポリシー・利用規約のページを除外する", () => {
+    for (const url of ["https://example.co.jp/privacy/", "https://example.co.jp/kiyaku.html", "https://example.co.jp/terms"]) {
+      expect(looksLikeContactForm(url, true, inquiryText, { hasTextarea: true, formFieldCount: 5 }), url).toBe(false);
+    }
+  });
+
+  it("本文の言葉が根拠でも、入力欄が3つ以上あれば認める", () => {
+    expect(looksLikeContactForm("https://example.co.jp/support.html", true, inquiryText, { hasTextarea: false, formFieldCount: 4 })).toBe(true);
+  });
+
+  it("入力欄の情報が無い場合は従来どおり判定する（旧データとの互換）", () => {
+    expect(looksLikeContactForm("https://example.co.jp/contact/", true, inquiryText)).toBe(true);
   });
 });
