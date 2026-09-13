@@ -169,3 +169,26 @@ describe("AI出力のぶれを受け止める", () => {
     expect(parse({ scores: { ...valid.scores, web_quality_score: 120 } }).ok).toBe(false);
   });
 });
+
+describe("SDKの検証で落ちない緩さを保つ", () => {
+  // Anthropic SDK はレスポンスをこのスキーマで検証してから返す。
+  // 制約を厳しくすると normalizeAnalysisOutput に届く前に失敗し、分析が丸ごと失われる。
+  // 実データで personalization 4件・従業員数0・空の根拠で失敗した。
+  const parse = (patch: Record<string, unknown>) => companyAnalysisOutputSchema.safeParse({ ...valid, ...patch });
+
+  it("固有の事実を4件返しても受け取れる", () => {
+    expect(
+      parse({
+        sales_outreach: { subject: "件名", body: "本文", personalization: ["1", "2", "3", "4"], hypothesis_note: null },
+      }).success,
+    ).toBe(true);
+  });
+
+  it("従業員数0を受け取れる", () => {
+    expect(parse({ employee_count_observed: 0 }).success).toBe(true);
+  });
+
+  it("本文が空の根拠を受け取れる", () => {
+    expect(parse({ evidence: [{ category: "company", source_url: "https://x", evidence_text: "" }] }).success).toBe(true);
+  });
+});

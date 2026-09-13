@@ -15,6 +15,8 @@ export interface OutreachContext {
   salesContactAllowed: "true" | "false" | "unknown";
   /** 依頼内容が未設定だった場合に返す説明 */
   missingReason?: string;
+  /** 依頼内容（取材テーマ等）が設定済みか */
+  outreachConfigured?: boolean;
   /** 実際に確認できた連絡先。ここに無い宛先を文面に書かせない */
   knownEmails: (string | null | undefined)[];
   knownPhones: (string | null | undefined)[];
@@ -86,6 +88,9 @@ export function reviewOutreach(raw: CompanyAnalysisOutput["sales_outreach"], con
     return { ok: false, reason: "営業を断る表記が確認されたため文面は作成しません" };
   }
   if (!raw) {
+    // 依頼内容が設定済みなのに文面が無い場合は、AI が返さなかったということ。
+    // 「未設定のため」と表示すると原因を取り違える。
+    if (context.outreachConfigured) return { ok: false, reason: "AIが文面を返しませんでした（材料が乏しい可能性があります）" };
     return { ok: false, reason: context.missingReason ?? "依頼内容が未設定のため文面は生成されていません" };
   }
   if (!raw.subject.trim() || !raw.body.trim()) {

@@ -82,6 +82,7 @@ export async function analyzeCompany(db: Db, companyId: string, logger: Logger):
     knownEmails: [company.email],
     knownPhones: [company.phone],
     missingReason: outreachMissingHint(outreachConfig.purpose),
+    outreachConfigured: outreachConfig.configured,
     // 社名・差出人がローマ字の場合に英字判定で弾かれないようにする
     allowedLatinWords: [
       ...(company.company_name.match(/[A-Za-z][A-Za-z'-]{1,}/g) ?? []),

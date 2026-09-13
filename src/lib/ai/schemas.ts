@@ -16,7 +16,9 @@ const EVIDENCE_CATEGORIES = ["company", "business", "recruiting", "web", "sns", 
 export const evidenceSchema = z.object({
   category: z.enum(EVIDENCE_CATEGORIES),
   source_url: z.string(),
-  evidence_text: z.string().min(1).max(200),
+  // 制約は「モデルへの指示」でもある。厳しくすると SDK の検証で落ち、
+  // 分析が丸ごと失われる。緩めに受け取り、normalizeAnalysisOutput で整える。
+  evidence_text: z.string().max(200),
 });
 
 /**
@@ -35,7 +37,8 @@ export const companyAnalysisOutputSchema = z.object({
   target_candidates: z.array(z.string().max(40)).max(5),
   new_graduate_hiring: z.enum(["yes", "no", "unknown"]),
   mid_career_hiring: z.enum(["yes", "no", "unknown"]),
-  employee_count_observed: z.number().int().positive().nullable(),
+  // 0 を「不明」の意味で返してくることがある（normalize で null にする）
+  employee_count_observed: z.number().int().nullable(),
   scores: z.object({
     recruitment_page_quality_score: nullableScore,
     recruitment_issue_score: nullableScore,
@@ -65,7 +68,8 @@ export const companyAnalysisOutputSchema = z.object({
       subject: z.string().max(60),
       body: z.string().max(700),
       /** 文面で触れたその企業固有の事実（observed_facts から。監査用） */
-      personalization: z.array(z.string().max(120)).max(3),
+      // 実際に使うのは3件。4件以上返して分析ごと失われるより、受け取って切り詰める
+      personalization: z.array(z.string().max(120)).max(6),
       /** 推測に基づく部分があれば明示する */
       hypothesis_note: z.string().max(150).nullable(),
     })
@@ -88,7 +92,9 @@ function pickEnum<T extends readonly string[]>(value: unknown, values: T, fallba
 /**
  * 検証の前に、AI 出力の些細なぶれを整える。
  *
- * スキーマ側を緩めることはできない（API に送る JSON Schema の生成に使うため）。
+ * Anthropic SDK は**この関数より前に**レスポンスをスキーマで検証する。
+ * そのためスキーマ側の制約を厳しくすると、ここに届く前に失敗する。
+ * スキーマは緩めに受け取り、絞り込みはここで行う。
  * 厳格に検証して丸ごと失敗させると、その企業の分析がすべて失われ、
  * 再試行の費用も無駄になる。実データでは
  * 「personalization が4件（上限3）」「employee_count_observed が0」
